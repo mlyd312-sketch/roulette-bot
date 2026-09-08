@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import subprocess
+import signal
 from threading import Thread
 from flask import Flask
 import telebot
@@ -36,6 +37,7 @@ uploaded_dir = "uploaded_files"
 os.makedirs(uploaded_dir, exist_ok=True)
 
 user_points = {}
+running_processes = {}  # قاموس لتتبع عمليات الملفات المشغلة PID
 
 def is_admin(user_id):
     return user_id == ADMIN_ID
@@ -49,13 +51,14 @@ def get_main_menu_markup():
         types.InlineKeyboardButton("🔴 رفع ملف", callback_data='upload_file')
     )
     markup.row(
-        types.InlineKeyboardButton("🟠 حسابي 📊", callback_data='my_account'),
+        types.InlineKeyboardButton("🛑 إيقاف ملف", callback_data='stop_file'),
         types.InlineKeyboardButton("📦 المتجر 🛒", callback_data='store')
     )
     markup.row(
-        types.InlineKeyboardButton("💎 نقاطي 💰", callback_data='my_points'),
-        types.InlineKeyboardButton("📖 التعليمات", callback_data='instructions')
+        types.InlineKeyboardButton("🟠 حسابي 📊", callback_data='my_account'),
+        types.InlineKeyboardButton("💎 نقاطي 💰", callback_data='my_points')
     )
+    markup.row(types.InlineKeyboardButton("📖 التعليمات", callback_data='instructions'))
     markup.row(types.InlineKeyboardButton("💎 الاشتراك المميز", callback_data='vip_sub'))
     markup.row(types.InlineKeyboardButton("👥 ربح نقاط مجاناً 🔗", callback_data='free_points'))
     markup.row(types.InlineKeyboardButton("🎁 الهدية اليومية", callback_data='daily_gift'))
@@ -114,7 +117,54 @@ def handle_query(call):
         bot.send_message(chat_id, msg, parse_mode='Markdown')
         bot.answer_callback_query(call.id)
 
-# ======= استقبال وتشغيل الملف المرفوع بشكل مستقل ======= #
+    elif call.data == 'stop_file':
+        files = [f for f in os.listdir(uploaded_dir) if f.endswith('.py')]
+        if not files:
+            bot.send_message(chat_id, "📁 لا توجد ملفات مشغلة حالياً لإيقافها.")
+            bot.answer_callback_query(call.id)
+            return
+
+        markup = types.InlineKeyboardMarkup()
+        for f in files:
+            markup.add(types.InlineKeyboardButton(f"🛑 إيقاف {f}", callback_data=f"kill_{f}"))
+        markup.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data='back_to_main'))
+
+        bot.send_message(chat_id, "🛑 **اختر الملف الذي تريد إيقافه وتشغيله:**", reply_markup=markup, parse_mode='Markdown')
+        bot.answer_callback_query(call.id)
+
+    elif call.data.startswith('kill_'):
+        file_to_kill = call.data.replace('kill_', '')
+        file_path = os.path.join(uploaded_dir, file_to_kill)
+
+        # إنهاء العملية إذا كانت مسجلة
+        if file_to_kill in running_processes:
+            try:
+                process = running_processes[file_to_kill]
+                process.terminate()
+                del running_processes[file_to_kill]
+            except Exception:
+                pass
+
+        # حذف الملف من السيرفر
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+
+        bot.send_message(chat_id, f"✅ **تم إيقاف وحذف الملف `{file_to_kill}` بنجاح!**", parse_mode='Markdown')
+        bot.answer_callback_query(call.id)
+
+    elif call.data == 'my_points':
+        pts_text = "👑 أنت مالك البوت، استخدامك مجاني وغير محدود!" if is_admin(user_id) else f"💎 رصيدك الحالي هو: **{user_points.get(user_id, 55)} نقطة**"
+        bot.send_message(chat_id, pts_text, parse_mode='Markdown')
+        bot.answer_callback_query(call.id)
+
+    elif call.data == 'daily_gift':
+        user_points[user_id] = user_points.get(user_id, 55) + 10
+        bot.answer_callback_query(call.id, "🎁 حصلت على 10 نقاط هدية يومية!", show_alert=True)
+
+# ======= استقبال وتشغيل الملف المرفوع ======= #
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
     user_id = message.from_user.id
@@ -141,24 +191,26 @@ def handle_docs(message):
         with open(file_path, 'wb') as f:
             f.write(downloaded)
 
-        # 2. تثبيت المكتبات الأساسية للبوت المرفوع تلقائياً
+        # 2. تثبيت المكتبات الأساسية تلقائياً
         subprocess.run([sys.executable, "-m", "pip", "install", "pyTelegramBotAPI", "requests", "aiohttp"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # 3. تشغيل الملف المرفوع في عملية مستقلة تماماً مع تسجيل الخرج
-        log_path = os.path.join(uploaded_dir, f"{file_name}.log")
-        log_file = open(log_path, "a")
-        
-        # start_new_session يمنع توقف البوت المرفوع عند توقف البوت الرئيسي
-        subprocess.Popen([sys.executable, file_path], stdout=log_file, stderr=log_file, start_new_session=True)
+        # 3. إيقاف أي نسخة قديمة بنفس الاسم إن وجدت
+        if file_name in running_processes:
+            try:
+                running_processes[file_name].terminate()
+            except Exception:
+                pass
+
+        # 4. تشغيل الملف الجديد وتسجيل عمليته
+        proc = subprocess.Popen([sys.executable, file_path], start_new_session=True)
+        running_processes[file_name] = proc
 
         if not is_admin(user_id):
             user_points[user_id] -= 10
 
         bot.edit_message_text(
-            f"✅ **تم تشغيل الملف `{file_name}` بنجاح في الخلفية!**\n\n"
-            "⚠️ **ملاحظة هامة جداً:**\n"
-            "• تأكد أن البوت المرفوع غير شغال في مكان آخر (على جهازك مثلاً) لتجنب التعارض.\n"
-            "• تأكد أن التوكن المكتوب داخل الملف المرفوع صحيح وليس محظوراً.",
+            f"✅ **تم تشغيل الملف `{file_name}` بنجاح!**\n\n"
+            "💡 يمكنك إيقاف هذا الملف في أي وقت عبر زر **🛑 إيقاف ملف** من القائمة الرئيسية.",
             chat_id=message.chat.id,
             message_id=status_msg.message_id,
             parse_mode='Markdown'
