@@ -12,6 +12,19 @@ bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 user_states = {}
 
 
+class StyledInlineKeyboardButton(InlineKeyboardButton):
+    def __init__(self, text, url=None, callback_data=None, style=None, **kwargs):
+        super().__init__(text, url=url, callback_data=callback_data, **kwargs)
+        if style:
+            self.style = style
+
+    def to_dict(self):
+        data = super().to_dict()
+        if hasattr(self, 'style') and self.style:
+            data['style'] = self.style
+        return data
+
+
 def init_db():
     conn = sqlite3.connect('bot_database.db', check_same_thread=False)
     cursor = conn.cursor()
@@ -131,34 +144,38 @@ def parse_channel_input(message):
 def main_menu(user=None):
     markup = InlineKeyboardMarkup()
 
-    btn1 = InlineKeyboardButton(
-        "اضفني الى مجموعتك +",
-        url=f"http://t.me/{bot.get_me().username}?startgroup=true"
-    )
-    btn1.style = "primary"
-    markup.add(btn1)
-
-    btn2 = InlineKeyboardButton(
-        "شراء بوت ↗",
-        url="https://t.me/u_8_y"
-    )
-    btn2.style = "success"
-
-    btn3 = InlineKeyboardButton(
-        "المطور ↗",
-        url="https://t.me/u_8_y"
-    )
-    btn3.style = "primary"
-
-    markup.row(btn2, btn3)
-
-    if user and is_developer(user):
-        btn4 = InlineKeyboardButton(
-            "لوحة تحكم المطور 🛠",
-            callback_data="dev_panel"
+    # زر أزرق
+    markup.add(
+        StyledInlineKeyboardButton(
+            "اضفني الى مجموعتك +",
+            url=f"http://t.me/{bot.get_me().username}?startgroup=true",
+            style="primary"
         )
-        btn4.style = "danger"
-        markup.add(btn4)
+    )
+
+    # زر أخضر + زر أزرق
+    markup.row(
+        StyledInlineKeyboardButton(
+            "شراء بوت ↗",
+            url="https://t.me/u_8_y",
+            style="success"
+        ),
+        StyledInlineKeyboardButton(
+            "المطور ↗",
+            url="https://t.me/u_8_y",
+            style="primary"
+        )
+    )
+
+    # زر أحمر للمطور
+    if user and is_developer(user):
+        markup.add(
+            StyledInlineKeyboardButton(
+                "لوحة تحكم المطور 🛠",
+                callback_data="dev_panel",
+                style="danger"
+            )
+        )
 
     return markup
 
@@ -188,14 +205,12 @@ def send_welcome(message):
                 warning_text = "• يجب عليك الاشتراك بالقنوات التالية لاستخدام البوت :"
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                
-                b_chan = InlineKeyboardButton(channel_title, url=ch_link)
-                b_chan.style = "primary"
-                markup.add(b_chan)
-                
-                b_check = InlineKeyboardButton("اشتريت ✅", callback_data="check_bot_sub")
-                b_check.style = "success"
-                markup.add(b_check)
+                markup.add(
+                    StyledInlineKeyboardButton(channel_title, url=ch_link, style="primary")
+                )
+                markup.add(
+                    StyledInlineKeyboardButton("اشتريت ✅", callback_data="check_bot_sub", style="success")
+                )
 
                 bot.send_message(message.chat.id, warning_text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
                 return
@@ -315,9 +330,9 @@ def check_group_messages(message):
                 )
 
                 markup = InlineKeyboardMarkup()
-                b_sub = InlineKeyboardButton(channel_title, url=ch_link)
-                b_sub.style = "primary"
-                markup.add(b_sub)
+                markup.add(
+                    StyledInlineKeyboardButton(channel_title, url=ch_link, style="primary")
+                )
 
                 bot.send_message(message.chat.id, warning_text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
                 return
@@ -344,17 +359,17 @@ def handle_private_messages(message):
                 user_states.pop(user_id, None)
 
                 markup = InlineKeyboardMarkup()
-                b_back = InlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel")
-                b_back.style = "primary"
-                markup.add(b_back)
+                markup.add(
+                    StyledInlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel", style="primary")
+                )
 
                 bot.reply_to(message, f"<b>✅ تم ضبط قناة الاشتراك الإجباري للبوت بنجاح: {channel}</b>", reply_markup=markup, parse_mode="HTML")
                 return
             except Exception:
                 markup = InlineKeyboardMarkup()
-                b_back = InlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel")
-                b_back.style = "primary"
-                markup.add(b_back)
+                markup.add(
+                    StyledInlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel", style="primary")
+                )
 
                 bot.reply_to(message, "❌ فشل تعيين القناة. تأكد من أن البوت مشرف فيها!", reply_markup=markup)
                 return
@@ -394,21 +409,20 @@ def handle_callbacks(call):
         markup = InlineKeyboardMarkup(row_width=1)
 
         if bot_sub_ch:
-            b1 = InlineKeyboardButton("إيقاف اشتراك البوت الإجباري 🛑", callback_data="disable_bot_sub")
-            b1.style = "danger"
-            markup.add(b1)
-
-            b2 = InlineKeyboardButton("تغيير قناة اشتراك البوت 🔄", callback_data="set_bot_sub")
-            b2.style = "primary"
-            markup.add(b2)
+            markup.add(
+                StyledInlineKeyboardButton("إيقاف اشتراك البوت الإجباري 🛑", callback_data="disable_bot_sub", style="danger")
+            )
+            markup.add(
+                StyledInlineKeyboardButton("تغيير قناة اشتراك البوت 🔄", callback_data="set_bot_sub", style="primary")
+            )
         else:
-            b3 = InlineKeyboardButton("تعيين قناة اشتراك إجباري للبوت ➕", callback_data="set_bot_sub")
-            b3.style = "success"
-            markup.add(b3)
+            markup.add(
+                StyledInlineKeyboardButton("تعيين قناة اشتراك إجباري للبوت ➕", callback_data="set_bot_sub", style="success")
+            )
 
-        b4 = InlineKeyboardButton("القائمة الرئيسية 🔙", callback_data="main_menu")
-        b4.style = "primary"
-        markup.add(b4)
+        markup.add(
+            StyledInlineKeyboardButton("القائمة الرئيسية 🔙", callback_data="main_menu", style="primary")
+        )
 
         try:
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="HTML")
@@ -426,9 +440,9 @@ def handle_callbacks(call):
         text = "📢 أرسل الآن يوزر القناة (مثلاً @ChannelName) أو قم بتوجيه منشور منها، وتأكد من أن البوت مشرف فيها:"
         
         markup = InlineKeyboardMarkup()
-        b_cancel = InlineKeyboardButton("إلغاء ❌", callback_data="dev_panel")
-        b_cancel.style = "danger"
-        markup.add(b_cancel)
+        markup.add(
+            StyledInlineKeyboardButton("إلغاء ❌", callback_data="dev_panel", style="danger")
+        )
 
         try:
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
