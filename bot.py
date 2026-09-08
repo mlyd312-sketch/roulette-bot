@@ -7,7 +7,6 @@ import tempfile
 import threading
 import subprocess
 from datetime import datetime
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 import telebot
@@ -21,176 +20,150 @@ ADMIN_CHANNEL = '@FD_CQ'
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# إعدادات النظام والمجلدات
+# إعدادات المجلدات والحدود
 uploaded_files_dir = "uploaded_files"
-suspicious_files_dir = 'suspicious_files'
-MAX_FILE_SIZE = 2 * 1024 * 1024
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
-for directory in [uploaded_files_dir, suspicious_files_dir]:
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+if not os.path.exists(uploaded_files_dir):
+    os.makedirs(uploaded_files_dir)
 
-# متغيرات النظام
-bot_scripts = {}
-user_chats = {}
-banned_users = set()
-
-protection_enabled = True
-bot_running = True
-
+# إدارة التزامن والملفات
+active_processes = {}
 lock = threading.Lock()
 executor = ThreadPoolExecutor(max_workers=10)
 
 def is_admin(user_id):
     return user_id == ADMIN_ID
 
-# ======= القائمة الرئيسية والأوامر ======= #
-def show_main_menu(message):
+# ======= القائمة الرئيسية ======= #
+def show_main_menu(chat_id, user_name):
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("رفع ملف 📥", callback_data='upload'),
-        types.InlineKeyboardButton("🚀 سرعة البوت", callback_data='speed')
+        types.InlineKeyboardButton("📤 رفع ملف python", callback_data='upload'),
+        types.InlineKeyboardButton("⚡ سرعة البوت", callback_data='speed')
     )
     markup.add(
-        types.InlineKeyboardButton("📚 تثبيت مكتبة", callback_data='download_lib'),
-        types.InlineKeyboardButton("📞 التواصل مع الدعم", callback_data='online_support')
+        types.InlineKeyboardButton("📚 تثبيت مكتبة pip", callback_data='download_lib'),
+        types.InlineKeyboardButton("📂 الملفات المرفوعة", callback_data='list_files')
+    )
+    markup.add(
+        types.InlineKeyboardButton("📞 الدعم الفني", callback_data='online_support')
     )
 
-    if is_admin(message.from_user.id):
-        markup.add(
-            types.InlineKeyboardButton("👥 قائمة الملفات", callback_data='manage_users')
-        )
-
-    user_name = message.from_user.first_name
     main_text = (
-        "🐍 **Python Hosting** 🐍\n\n"
-        f"مرحباً بك يا {user_name}! 👋\n\n"
-        "**الميزات المتاحة:** ✅\n\n"
-        "• تشغيل ملفات بايثون على سيرفر خاص\n"
-        "• تثبيت المكتبات وتتبع السرعة\n"
-        "• تواصل مع الدعم لأي استفسار\n\n"
-        "**اختر من الأزرار أدناه:**"
+        "🐍 **سيرفر استضافة بوتات بايثون** 🐍\n\n"
+        f"مرحباً بك يا **{user_name}** 👋\n\n"
+        "يمكنك رفع وتشغيل ملفاتك بشكل مستمر على السيرفر.\n"
+        "اختر الخيار المطلوب من الأزرار أدناه:"
     )
 
-    bot.send_message(
-        message.chat.id,
-        main_text,
-        reply_markup=markup,
-        parse_mode='Markdown'
-    )
+    bot.send_message(chat_id, main_text, reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    if not bot_running:
-        bot.send_message(message.chat.id, "⏸️ البوت متوقف حاليًا.")
-        return
+    show_main_menu(message.chat.id, message.from_user.first_name)
 
-    # تشغيل القائمة الرئيسية مباشرة لأي مستخدم
-    show_main_menu(message)
+# ======= الاستجابة للكبسات (Callback Queries) ======= #
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callbacks(call):
+    chat_id = call.message.chat.id
 
-# ======= المعالجات Callback Query ======= #
-@bot.callback_query_handler(func=lambda call: call.data == 'back_to_main')
-def back_to_main(call):
-    show_main_menu(call.message)
-    bot.answer_callback_query(call.id)
+    if call.data == 'back_to_main':
+        show_main_menu(chat_id, call.from_user.first_name)
+        bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data == 'speed')
-def check_speed(call):
-    bot.answer_callback_query(call.id, "⏳ جاري قياس السرعة...")
-    start_time = time.time()
-    time.sleep(0.05)
-    response_time = (time.time() - start_time) * 1000
-
-    rating = "⚡ ممتازة!" if response_time < 100 else "🚀 جيدة"
-    current_time = datetime.now().strftime('%I:%M %p')
-    
-    speed_text = (
-        "⚡ **سرعة البوت الحالية:**\n\n"
-        f"• سرعة الاستجابة: `{response_time:.2f} ms`\n"
-        f"• التقييم: **{rating}**\n\n"
-        f"_{current_time}_"
-    )
-
-    bot.send_message(call.message.chat.id, speed_text, parse_mode='Markdown')
-
-@bot.callback_query_handler(func=lambda call: call.data == 'upload')
-def upload_file_callback(call):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("❌ إلغاء", callback_data='back_to_main'))
-    
-    upload_text = (
-        "📤 **رفع ملف**\n\n"
-        "أرسل ملف البوت الآن (بصيغة `.py` فقط)\n"
-        "الحد الأقصى للحجم: 2MB"
-    )
-    
-    bot.send_message(call.message.chat.id, upload_text, reply_markup=markup, parse_mode='Markdown')
-    bot.answer_callback_query(call.id)
-
-@bot.callback_query_handler(func=lambda call: call.data == 'download_lib')
-def download_library(call):
-    bot.send_message(call.message.chat.id, "📚 أرسل اسم المكتبة التي تريد تثبيتها (مثال: `requests`):", parse_mode='Markdown')
-    bot.register_next_step_handler(call.message, install_library_step)
-    bot.answer_callback_query(call.id)
-
-def install_library_step(message):
-    library_name = message.text.strip()
-    bot.send_message(message.chat.id, f"🔄 جاري تثبيت `{library_name}`...", parse_mode='Markdown')
-
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", library_name],
-            capture_output=True,
-            text=True,
-            timeout=40
+    elif call.data == 'speed':
+        start_time = time.time()
+        msg = bot.send_message(chat_id, "⏳ جاري فحص استجابة السيرفر...")
+        latency = (time.time() - start_time) * 1000
+        bot.edit_message_text(
+            f"⚡ **سرعة الاستجابة:** `{latency:.2f} ms`\n🟢 السيرفر يعمل بكفاءة عاليه.",
+            chat_id,
+            msg.message_id,
+            parse_mode='Markdown'
         )
-        if result.returncode == 0:
-            bot.send_message(message.chat.id, f"✅ تم تثبيت `{library_name}` بنجاح", parse_mode='Markdown')
+        bot.answer_callback_query(call.id)
+
+    elif call.data == 'upload':
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 إلغاء", callback_data='back_to_main'))
+        bot.send_message(chat_id, "📤 **قم بإرسال ملف البوت الخاص بك بصيغة `.py` الآن:**", reply_markup=markup, parse_mode='Markdown')
+        bot.answer_callback_query(call.id)
+
+    elif call.data == 'download_lib':
+        bot.send_message(chat_id, "📚 **أرسل اسم المكتبة المراد تثبيتها (مثال: `requests` أو `telebot`):**", parse_mode='Markdown')
+        bot.register_next_step_handler(call.message, install_library)
+        bot.answer_callback_query(call.id)
+
+    elif call.data == 'list_files':
+        files = os.listdir(uploaded_files_dir)
+        if not files:
+            bot.send_message(chat_id, "📂 لا يوجد ملفات مرفوعة حالياً.")
         else:
-            bot.send_message(message.chat.id, f"❌ فشل التثبيت:\n```\n{result.stderr[:300]}\n```", parse_mode='Markdown')
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ خطأ أثناء التثبيت: {e}")
+            msg_files = "📂 **الملفات المرفوعة:**\n\n" + "\n".join([f"• `{f}`" for f in files])
+            bot.send_message(chat_id, msg_files, parse_mode='Markdown')
+        bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data == 'online_support')
-def online_support(call):
-    username_val = call.from_user.username or 'غير متوفر'
-    user_info = f"👤 {call.from_user.first_name}\n🆔 `{call.from_user.id}`\n📌 @{username_val}"
-    bot.send_message(ADMIN_ID, f"📞 **طلب دعم فوري:**\n\n{user_info}", parse_mode='Markdown')
-    bot.answer_callback_query(call.id, "✅ تم إرسال طلبك للإدارة")
+    elif call.data == 'online_support':
+        bot.send_message(chat_id, f"📞 للتواصل مع الدعم المباشر: {YOUR_USERNAME}")
+        bot.answer_callback_query(call.id)
 
-# ======= معالجة رفع الملفات ======= #
+# ======= تثبيت المكتبات ======= #
+def install_library(message):
+    lib_name = message.text.strip()
+    bot.send_message(message.chat.id, f"🔄 جاري تثبيت المكتبة `{lib_name}`...", parse_mode='Markdown')
+    
+    def run_pip():
+        try:
+            res = subprocess.run([sys.executable, "-m", "pip", "install", lib_name], capture_output=True, text=True, timeout=60)
+            if res.returncode == 0:
+                bot.send_message(message.chat.id, f"✅ تم تثبيت المكتبة `{lib_name}` بنجاح!", parse_mode='Markdown')
+            else:
+                bot.send_message(message.chat.id, f"❌ فشل التثبيت:\n```\n{res.stderr[:300]}\n```", parse_mode='Markdown')
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ خطأ: {e}")
+
+    executor.submit(run_pip)
+
+# ======= استقبال وتشغيل الملفات ======= #
 @bot.message_handler(content_types=['document'])
-def handle_file_upload(message):
-    if message.document.file_size > MAX_FILE_SIZE:
-        bot.reply_to(message, "⛔ حجم الملف يتجاوز الحد المسموح (2MB).")
-        return
-
+def handle_docs(message):
     file_name = message.document.file_name
     if not file_name.endswith('.py'):
-        bot.reply_to(message, "❌ يُسمح فقط برفع ملفات بايثون (`.py`).", parse_mode='Markdown')
+        bot.reply_to(message, "❌ يرجى إرسال ملفات بصيغة `.py` فقط.")
+        return
+
+    if message.document.file_size > MAX_FILE_SIZE:
+        bot.reply_to(message, "⚠️ حجم الملف كبير جداً (الأقصى 5 ميجابايت).")
         return
 
     try:
         file_info = bot.get_file(message.document.file_id)
         downloaded = bot.download_file(file_info.file_path)
+        file_path = os.path.join(uploaded_files_dir, file_name)
 
-        final_path = os.path.join(uploaded_files_dir, file_name)
-        with open(final_path, 'wb') as f:
+        with open(file_path, 'wb') as f:
             f.write(downloaded)
 
-        uploader = message.from_user.username or 'بدون'
-        file_msg = (
-            "✅ **تم رفع الملف بنجاح وتغليفه للتطبيق.**\n\n"
-            f"📁 الملف: `{file_name}`\n"
-            f"👤 المرفع: @{uploader}"
-        )
+        bot.reply_to(message, f"✅ تم حفظ وتجهيز الملف: `{file_name}`\n🚀 جاري تشغيل الملف في الخلفية...", parse_mode='Markdown')
 
-        bot.reply_to(message, file_msg, parse_mode='Markdown')
+        # تشغيل السكربت كعملية منفصلة
+        def run_script():
+            proc = subprocess.Popen([sys.executable, file_path])
+            with lock:
+                active_processes[file_name] = proc
+
+        executor.submit(run_script)
 
     except Exception as e:
-        bot.reply_to(message, f"❌ حدث خطأ أثناء المعالجة: {e}")
+        bot.reply_to(message, f"❌ حدث خطأ أثناء معالجة الملف: {e}")
 
-# ======= تشغيل البوت الرئيسي ======= #
+# ======= تشغيل البوت مع إعادة الاتصال التلقائي ======= #
 if __name__ == '__main__':
-    print("🤖 البوت يعمل بنجاح...")
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    print("🤖 البوت شغال وجاهز لاستقبال الأوامر...")
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=1, timeout=30)
+        except Exception as e:
+            print(f"⚠️ انقطع الاتصال، جاري إعادة المحاولة: {e}")
+            time.sleep(3)
