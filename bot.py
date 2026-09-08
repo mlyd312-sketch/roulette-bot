@@ -3,7 +3,12 @@ import datetime
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# =========================================================
+# إعدادات البوت
+# =========================================================
+
 BOT_TOKEN = "8582451165:AAGVytO4wBe5mRPfkOQaDXhq1WSWmrb7KQs"
+
 DEVELOPER_USERNAME = "u_8_y"
 DEVELOPER_USERNAMES = ["u_8_y"]
 DEVELOPER_IDS = [750000000]
@@ -12,8 +17,16 @@ bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 user_states = {}
 
 
+# =========================================================
+# قاعدة البيانات
+# =========================================================
+
 def init_db():
-    conn = sqlite3.connect('bot_database.db', check_same_thread=False)
+    conn = sqlite3.connect(
+        'bot_database.db',
+        check_same_thread=False
+    )
+
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -42,6 +55,19 @@ def init_db():
     except:
         pass
 
+    # تفعيل التلوين افتراضياً إذا لم يكن الإعداد موجوداً
+    cursor.execute(
+        "SELECT value FROM bot_settings WHERE key = 'button_colors_enabled'"
+    )
+
+    if not cursor.fetchone():
+        cursor.execute(
+            """
+            INSERT INTO bot_settings (key, value)
+            VALUES ('button_colors_enabled', '1')
+            """
+        )
+
     conn.commit()
     conn.close()
 
@@ -49,8 +75,78 @@ def init_db():
 init_db()
 
 
+# =========================================================
+# إعدادات تلوين الأزرار
+# =========================================================
+
+def get_button_colors_enabled():
+    conn = sqlite3.connect(
+        'bot_database.db',
+        check_same_thread=False
+    )
+
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT value FROM bot_settings WHERE key = 'button_colors_enabled'"
+    )
+
+    row = cursor.fetchone()
+
+    conn.close()
+
+    if not row:
+        return True
+
+    return row[0] == "1"
+
+
+def set_button_colors_enabled(enabled):
+    conn = sqlite3.connect(
+        'bot_database.db',
+        check_same_thread=False
+    )
+
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO bot_settings (key, value)
+        VALUES ('button_colors_enabled', ?)
+        """,
+        ("1" if enabled else "0",)
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def button_style(style):
+    """
+    إذا التلوين مفعّل:
+        يرجع style للزر.
+
+    إذا التلوين مطفأ:
+        لا يرجع style نهائياً،
+        وبالتالي Telegram يعرض الزر بالشكل الشفاف الافتراضي.
+    """
+
+    if get_button_colors_enabled():
+        return {"style": style}
+
+    return {}
+
+
+# =========================================================
+# اشتراك البوت
+# =========================================================
+
 def get_bot_sub_channel():
-    conn = sqlite3.connect('bot_database.db', check_same_thread=False)
+    conn = sqlite3.connect(
+        'bot_database.db',
+        check_same_thread=False
+    )
+
     cursor = conn.cursor()
 
     cursor.execute(
@@ -58,17 +154,26 @@ def get_bot_sub_channel():
     )
 
     row = cursor.fetchone()
+
     conn.close()
 
     return row[0] if row else ""
 
 
 def set_bot_sub_channel(channel):
-    conn = sqlite3.connect('bot_database.db', check_same_thread=False)
+    conn = sqlite3.connect(
+        'bot_database.db',
+        check_same_thread=False
+    )
+
     cursor = conn.cursor()
 
     cursor.execute(
-        "INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)",
+        """
+        INSERT OR REPLACE INTO bot_settings
+        (key, value)
+        VALUES (?, ?)
+        """,
         ('bot_sub_channel', channel)
     )
 
@@ -76,7 +181,12 @@ def set_bot_sub_channel(channel):
     conn.close()
 
 
+# =========================================================
+# التحقق من المطور
+# =========================================================
+
 def is_developer(user):
+
     if user.id in DEVELOPER_IDS:
         return True
 
@@ -88,8 +198,17 @@ def is_developer(user):
     return False
 
 
+# =========================================================
+# إضافة مجموعة
+# =========================================================
+
 def add_group_to_db(chat_id, chat_title, owner_id):
-    conn = sqlite3.connect('bot_database.db', check_same_thread=False)
+
+    conn = sqlite3.connect(
+        'bot_database.db',
+        check_same_thread=False
+    )
+
     cursor = conn.cursor()
 
     cursor.execute(
@@ -98,73 +217,134 @@ def add_group_to_db(chat_id, chat_title, owner_id):
     )
 
     row = cursor.fetchone()
-    current_date = datetime.datetime.now().strftime("%d-%m-%Y")
+
+    current_date = datetime.datetime.now().strftime(
+        "%d-%m-%Y"
+    )
 
     if not row:
-        cursor.execute('''
-            INSERT INTO groups
-            (chat_id, chat_title, owner_id, is_active,
-             sub_channel, add_date, added_by)
-            VALUES (?, ?, ?, 0, '', ?, ?)
-        ''', (
-            chat_id,
-            chat_title,
-            owner_id,
-            current_date,
-            owner_id
-        ))
-    else:
+
         cursor.execute(
-            "UPDATE groups SET chat_title = ? WHERE chat_id = ?",
-            (chat_title, chat_id)
+            '''
+            INSERT INTO groups
+            (
+                chat_id,
+                chat_title,
+                owner_id,
+                is_active,
+                sub_channel,
+                add_date,
+                added_by
+            )
+            VALUES (?, ?, ?, 0, '', ?, ?)
+            ''',
+            (
+                chat_id,
+                chat_title,
+                owner_id,
+                current_date,
+                owner_id
+            )
+        )
+
+    else:
+
+        cursor.execute(
+            """
+            UPDATE groups
+            SET chat_title = ?
+            WHERE chat_id = ?
+            """,
+            (
+                chat_title,
+                chat_id
+            )
         )
 
     conn.commit()
     conn.close()
 
 
+# =========================================================
+# معلومات المجموعة
+# =========================================================
+
 def get_group_info(chat_id):
-    conn = sqlite3.connect('bot_database.db', check_same_thread=False)
+
+    conn = sqlite3.connect(
+        'bot_database.db',
+        check_same_thread=False
+    )
+
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT chat_title, is_active, sub_channel, add_date "
-        "FROM groups WHERE chat_id = ?",
+        """
+        SELECT
+            chat_title,
+            is_active,
+            sub_channel,
+            add_date
+        FROM groups
+        WHERE chat_id = ?
+        """,
         (chat_id,)
     )
 
     row = cursor.fetchone()
+
     conn.close()
 
     return row
 
 
+# =========================================================
+# تحديث قناة المجموعة
+# =========================================================
+
 def update_group_channel(chat_id, channel, added_by=0):
-    conn = sqlite3.connect('bot_database.db', check_same_thread=False)
+
+    conn = sqlite3.connect(
+        'bot_database.db',
+        check_same_thread=False
+    )
+
     cursor = conn.cursor()
 
-    current_date = datetime.datetime.now().strftime("%d-%m-%Y")
+    current_date = datetime.datetime.now().strftime(
+        "%d-%m-%Y"
+    )
 
-    cursor.execute('''
+    cursor.execute(
+        '''
         UPDATE groups
-        SET sub_channel = ?,
+        SET
+            sub_channel = ?,
             is_active = 1,
             add_date = ?,
             added_by = ?
         WHERE chat_id = ?
-    ''', (
-        channel,
-        current_date,
-        added_by,
-        chat_id
-    ))
+        ''',
+        (
+            channel,
+            current_date,
+            added_by,
+            chat_id
+        )
+    )
 
     conn.commit()
     conn.close()
 
 
+# =========================================================
+# تحليل القناة
+# =========================================================
+
 def parse_channel_input(message):
+
     if message.forward_from_chat:
+
         chat = message.forward_from_chat
 
         if chat.username:
@@ -173,9 +353,11 @@ def parse_channel_input(message):
         return str(chat.id)
 
     if message.text:
+
         text = message.text.strip()
 
         if "t.me/" in text:
+
             parts = (
                 text.split("t.me/")[-1]
                 .split("?")[0]
@@ -190,45 +372,67 @@ def parse_channel_input(message):
     return None
 
 
+# =========================================================
+# القائمة الرئيسية
+# =========================================================
+
 def main_menu(user=None):
+
     markup = InlineKeyboardMarkup()
 
-    # استخدام dict للخصائص الإضافية للأزرار مثل الألوان لضمان عدم حصول خطأ
+    # -----------------------------------------------------
+    # إضافة البوت
+    # -----------------------------------------------------
+
     markup.add(
         InlineKeyboardButton(
             "اضفني الى مجموعتك +",
             url=f"http://t.me/{bot.get_me().username}?startgroup=true",
-            **{"style": "primary"}
+            **button_style("primary")
         )
     )
+
+    # -----------------------------------------------------
+    # شراء + المطور
+    # -----------------------------------------------------
 
     markup.row(
         InlineKeyboardButton(
             "شراء بوت ↗",
             url="https://t.me/u_8_y",
-            **{"style": "success"}
+            **button_style("success")
         ),
         InlineKeyboardButton(
             "المطور ↗",
             url="https://t.me/u_8_y",
-            **{"style": "primary"}
+            **button_style("primary")
         )
     )
 
+    # -----------------------------------------------------
+    # لوحة المطور
+    # -----------------------------------------------------
+
     if user and is_developer(user):
+
         markup.add(
             InlineKeyboardButton(
                 "لوحة تحكم المطور 🛠",
                 callback_data="dev_panel",
-                **{"style": "danger"}
+                **button_style("danger")
             )
         )
 
     return markup
 
 
+# =========================================================
+# /start
+# =========================================================
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+
     if message.chat.type != 'private':
         return
 
@@ -242,19 +446,29 @@ def send_welcome(message):
 
     bot_sub_ch = get_bot_sub_channel()
 
-    if bot_sub_ch and not is_developer(message.from_user):
+    if bot_sub_ch and not is_developer(
+        message.from_user
+    ):
+
         try:
+
             member_status = bot.get_chat_member(
                 bot_sub_ch,
                 user_id
             )
 
-            if member_status.status in ['left', 'kicked']:
+            if member_status.status in [
+                'left',
+                'kicked'
+            ]:
 
                 channel_title = bot_sub_ch
 
                 try:
-                    ch_info = bot.get_chat(bot_sub_ch)
+
+                    ch_info = bot.get_chat(
+                        bot_sub_ch
+                    )
 
                     if ch_info.title:
                         channel_title = ch_info.title
@@ -272,13 +486,15 @@ def send_welcome(message):
                     "• يجب عليك الاشتراك بالقنوات التالية لاستخدام البوت :"
                 )
 
-                markup = InlineKeyboardMarkup(row_width=1)
+                markup = InlineKeyboardMarkup(
+                    row_width=1
+                )
 
                 markup.add(
                     InlineKeyboardButton(
                         channel_title,
                         url=ch_link,
-                        **{"style": "primary"}
+                        **button_style("primary")
                     )
                 )
 
@@ -286,7 +502,7 @@ def send_welcome(message):
                     InlineKeyboardButton(
                         "اشتريت",
                         callback_data="check_bot_sub",
-                        **{"style": "success"}
+                        **button_style("success")
                     )
                 )
 
@@ -301,9 +517,15 @@ def send_welcome(message):
                 return
 
         except Exception as e:
-            print(f"Error checking bot sub: {e}")
 
-    user_states.pop(user_id, None)
+            print(
+                f"Error checking bot sub: {e}"
+            )
+
+    user_states.pop(
+        user_id,
+        None
+    )
 
     text = (
         f"أهلاً {user_name}\n"
@@ -316,62 +538,108 @@ def send_welcome(message):
     bot.send_message(
         message.chat.id,
         text,
-        reply_markup=main_menu(message.from_user),
+        reply_markup=main_menu(
+            message.from_user
+        ),
         parse_mode="HTML"
     )
 
 
+# =========================================================
+# رسائل المجموعات
+# =========================================================
+
 @bot.message_handler(
-    func=lambda message: message.chat.type in ['group', 'supergroup'],
+    func=lambda message:
+    message.chat.type in [
+        'group',
+        'supergroup'
+    ],
     content_types=[
-        'text', 'audio', 'document', 'photo',
-        'sticker', 'video', 'video_note', 'voice', 'forward'
+        'text',
+        'audio',
+        'document',
+        'photo',
+        'sticker',
+        'video',
+        'video_note',
+        'voice',
+        'forward'
     ]
 )
 def check_group_messages(message):
-    text_content = message.text.strip() if message.text else ""
+
+    text_content = (
+        message.text.strip()
+        if message.text
+        else ""
+    )
 
     try:
+
         add_group_to_db(
             message.chat.id,
             message.chat.title,
             message.from_user.id
         )
+
     except:
         pass
 
     try:
+
         chat_member = bot.get_chat_member(
             message.chat.id,
             message.from_user.id
         )
 
         is_admin_or_creator = (
-            chat_member.status in ['creator', 'administrator']
+            chat_member.status
+            in [
+                'creator',
+                'administrator'
+            ]
         )
 
     except:
+
         is_admin_or_creator = False
 
     if is_admin_or_creator:
+
         if message.from_user.id in user_states:
-            state_data = user_states[message.from_user.id]
+
+            state_data = user_states[
+                message.from_user.id
+            ]
 
             if isinstance(state_data, int):
+
                 chat_id = state_data
-                channel_target = parse_channel_input(message)
+
+                channel_target = parse_channel_input(
+                    message
+                )
 
                 if channel_target:
+
                     bot_info = bot.get_me()
 
                     try:
+
                         member = bot.get_chat_member(
                             channel_target,
                             bot_info.id
                         )
 
-                        if member.status in ['left', 'kicked']:
-                            raise Exception("BOT_NOT_ADMIN")
+                        if member.status in [
+                            'left',
+                            'kicked'
+                        ]:
+
+                            raise Exception(
+                                "BOT_NOT_ADMIN"
+                            )
 
                         update_group_channel(
                             chat_id,
@@ -379,7 +647,10 @@ def check_group_messages(message):
                             message.from_user.id
                         )
 
-                        user_states.pop(message.from_user.id, None)
+                        user_states.pop(
+                            message.from_user.id,
+                            None
+                        )
 
                         bot.reply_to(
                             message,
@@ -390,6 +661,7 @@ def check_group_messages(message):
                         return
 
                     except Exception:
+
                         bot.reply_to(
                             message,
                             "فشل ربط وتعيين القناة تأكد من وجود البوت مشرفاً فيها بالصلاحيات الكاملة",
@@ -398,17 +670,28 @@ def check_group_messages(message):
 
                         return
 
+        # -------------------------------------------------
+        # تفعيل
+        # -------------------------------------------------
+
         if text_content == "تفعيل":
-            user_states[message.from_user.id] = message.chat.id
+
+            user_states[
+                message.from_user.id
+            ] = message.chat.id
+
             user_name = (
                 message.from_user.first_name
                 if message.from_user.first_name
                 else "مستخدم"
             )
+
             user_id = message.from_user.id
 
             user_mention = (
-                f'<a href="tg://user?id={user_id}">{user_name}</a>'
+                f'<a href="tg://user?id={user_id}">'
+                f'{user_name}'
+                f'</a>'
             )
 
             success_msg = (
@@ -416,16 +699,40 @@ def check_group_messages(message):
                 f"~ قم برفع البوت مشرف في قناتك او مجموعتك العامة وققم بتوجية منشور من القناة او معرف القناة او المجموعة العامة"
             )
 
-            bot.reply_to(message, success_msg, parse_mode="HTML")
+            bot.reply_to(
+                message,
+                success_msg,
+                parse_mode="HTML"
+            )
+
             return
 
+        # -------------------------------------------------
+        # تعطيل
+        # -------------------------------------------------
+
         if text_content == "تعطيل":
-            user_states.pop(message.from_user.id, None)
-            conn = sqlite3.connect('bot_database.db', check_same_thread=False)
+
+            user_states.pop(
+                message.from_user.id,
+                None
+            )
+
+            conn = sqlite3.connect(
+                'bot_database.db',
+                check_same_thread=False
+            )
+
             cursor = conn.cursor()
 
             cursor.execute(
-                "UPDATE groups SET is_active = 0, sub_channel = '' WHERE chat_id = ?",
+                """
+                UPDATE groups
+                SET
+                    is_active = 0,
+                    sub_channel = ''
+                WHERE chat_id = ?
+                """,
                 (message.chat.id,)
             )
 
@@ -443,7 +750,9 @@ def check_group_messages(message):
     if message.from_user.is_bot:
         return
 
-    g_info = get_group_info(message.chat.id)
+    g_info = get_group_info(
+        message.chat.id
+    )
 
     if not g_info:
         return
@@ -451,12 +760,26 @@ def check_group_messages(message):
     g_title, is_active, sub_ch, add_date = g_info
 
     if is_active == 1 and sub_ch:
-        try:
-            member_status = bot.get_chat_member(sub_ch, message.from_user.id)
 
-            if member_status.status in ['left', 'kicked']:
+        try:
+
+            member_status = bot.get_chat_member(
+                sub_ch,
+                message.from_user.id
+            )
+
+            if member_status.status in [
+                'left',
+                'kicked'
+            ]:
+
                 try:
-                    bot.delete_message(message.chat.id, message.message_id)
+
+                    bot.delete_message(
+                        message.chat.id,
+                        message.message_id
+                    )
+
                 except:
                     pass
 
@@ -464,13 +787,19 @@ def check_group_messages(message):
                 channel_username = sub_ch
 
                 try:
-                    ch_info = bot.get_chat(sub_ch)
+
+                    ch_info = bot.get_chat(
+                        sub_ch
+                    )
 
                     if ch_info.title:
                         channel_title = ch_info.title
 
                     if ch_info.username:
-                        channel_username = f"@{ch_info.username}"
+                        channel_username = (
+                            f"@{ch_info.username}"
+                        )
+
                     elif str(sub_ch).startswith("@"):
                         channel_username = sub_ch
 
@@ -478,6 +807,7 @@ def check_group_messages(message):
                     pass
 
                 user_id = message.from_user.id
+
                 user_name = (
                     message.from_user.first_name
                     if message.from_user.first_name
@@ -485,7 +815,9 @@ def check_group_messages(message):
                 )
 
                 user_mention_link = (
-                    f'<a href="tg://user?id={user_id}">{user_name}</a>'
+                    f'<a href="tg://user?id={user_id}">'
+                    f'{user_name}'
+                    f'</a>'
                 )
 
                 ch_link = (
@@ -502,11 +834,12 @@ def check_group_messages(message):
                 )
 
                 markup = InlineKeyboardMarkup()
+
                 markup.add(
                     InlineKeyboardButton(
                         channel_title,
                         url=ch_link,
-                        **{"style": "primary"}
+                        **button_style("primary")
                     )
                 )
 
@@ -521,35 +854,68 @@ def check_group_messages(message):
                 return
 
         except Exception as e:
-            print(f"Error checking sub: {e}")
+
+            print(
+                f"Error checking sub: {e}"
+            )
 
 
-@bot.message_handler(func=lambda message: message.chat.type == 'private')
+# =========================================================
+# الرسائل الخاصة
+# =========================================================
+
+@bot.message_handler(
+    func=lambda message:
+    message.chat.type == 'private'
+)
 def handle_private_messages(message):
+
     user_id = message.from_user.id
 
     if user_id in user_states:
+
         state_data = user_states[user_id]
 
         if state_data == "waiting_bot_sub_channel":
-            channel = parse_channel_input(message)
+
+            channel = parse_channel_input(
+                message
+            )
+
             bot_info = bot.get_me()
 
             try:
-                member = bot.get_chat_member(channel, bot_info.id)
 
-                if member.status in ['left', 'kicked']:
-                    raise Exception("BOT_NOT_ADMIN")
+                member = bot.get_chat_member(
+                    channel,
+                    bot_info.id
+                )
 
-                set_bot_sub_channel(str(channel))
-                user_states.pop(user_id, None)
+                if member.status in [
+                    'left',
+                    'kicked'
+                ]:
+
+                    raise Exception(
+                        "BOT_NOT_ADMIN"
+                    )
+
+                set_bot_sub_channel(
+                    str(channel)
+                )
+
+                user_states.pop(
+                    user_id,
+                    None
+                )
 
                 markup = InlineKeyboardMarkup()
+
                 markup.add(
                     InlineKeyboardButton(
                         "لوحة التحكم 🔙",
                         callback_data="dev_panel",
-                        **{"style": "primary"}
+                        **button_style("primary")
                     )
                 )
 
@@ -563,12 +929,14 @@ def handle_private_messages(message):
                 return
 
             except Exception:
+
                 markup = InlineKeyboardMarkup()
+
                 markup.add(
                     InlineKeyboardButton(
                         "لوحة التحكم 🔙",
                         callback_data="dev_panel",
-                        **{"style": "primary"}
+                        **button_style("primary")
                     )
                 )
 
@@ -581,19 +949,37 @@ def handle_private_messages(message):
                 return
 
 
-@bot.callback_query_handler(func=lambda call: True)
+# =========================================================
+# Callback
+# =========================================================
+
+@bot.callback_query_handler(
+    func=lambda call: True
+)
 def handle_callbacks(call):
+
+    # =====================================================
+    # فحص الاشتراك
+    # =====================================================
+
     if call.data == "check_bot_sub":
+
         bot_sub_ch = get_bot_sub_channel()
 
         if bot_sub_ch:
+
             try:
+
                 member_status = bot.get_chat_member(
                     bot_sub_ch,
                     call.from_user.id
                 )
 
-                if member_status.status in ['left', 'kicked']:
+                if member_status.status in [
+                    'left',
+                    'kicked'
+                ]:
+
                     bot.answer_callback_query(
                         call.id,
                         "❌ عذراً، لم تقم بالاشتراك في القناة بعد!",
@@ -605,31 +991,60 @@ def handle_callbacks(call):
             except:
                 pass
 
-        bot.answer_callback_query(call.id, "✅ شكراً لاشتراكك!")
+        bot.answer_callback_query(
+            call.id,
+            "✅ شكراً لاشتراكك!"
+        )
 
         try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
+
+            bot.delete_message(
+                call.message.chat.id,
+                call.message.message_id
+            )
+
         except:
             pass
 
-        call.message.from_user = call.from_user
-        send_welcome(call.message)
+        call.message.from_user = (
+            call.from_user
+        )
+
+        send_welcome(
+            call.message
+        )
+
+    # =====================================================
+    # شراء البوت - احتياطياً
+    # =====================================================
 
     elif call.data == "buy_bot":
+
         bot.answer_callback_query(
             call.id,
-            "لشراء بوت، تواصل مع المطور: @" + DEVELOPER_USERNAME,
+            "لشراء بوت، تواصل مع المطور: @"
+            + DEVELOPER_USERNAME,
             show_alert=True
         )
 
+    # =====================================================
+    # معلومات المطور - احتياطياً
+    # =====================================================
+
     elif call.data == "dev_info":
+
         bot.answer_callback_query(
             call.id,
             f"المطور: @{DEVELOPER_USERNAME}",
             show_alert=True
         )
 
+    # =====================================================
+    # القائمة الرئيسية
+    # =====================================================
+
     elif call.data == "main_menu":
+
         user_name = (
             call.from_user.first_name
             if call.from_user.first_name
@@ -648,14 +1063,26 @@ def handle_callbacks(call):
             text,
             call.message.chat.id,
             call.message.message_id,
-            reply_markup=main_menu(call.from_user),
+            reply_markup=main_menu(
+                call.from_user
+            ),
             parse_mode="HTML"
         )
 
-        bot.answer_callback_query(call.id)
+        bot.answer_callback_query(
+            call.id
+        )
+
+    # =====================================================
+    # لوحة المطور
+    # =====================================================
 
     elif call.data == "dev_panel":
-        if not is_developer(call.from_user):
+
+        if not is_developer(
+            call.from_user
+        ):
+
             bot.answer_callback_query(
                 call.id,
                 "هذه القائمة خاصة بالمطور فقط!",
@@ -664,24 +1091,54 @@ def handle_callbacks(call):
 
             return
 
-        user_states.pop(call.from_user.id, None)
+        user_states.pop(
+            call.from_user.id,
+            None
+        )
+
         bot_sub_ch = get_bot_sub_channel()
 
-        sub_status = f"مفعلة ({bot_sub_ch})" if bot_sub_ch else "معطلة"
+        sub_status = (
+            f"مفعلة ({bot_sub_ch})"
+            if bot_sub_ch
+            else
+            "معطلة"
+        )
+
+        colors_enabled = (
+            get_button_colors_enabled()
+        )
+
+        color_status = (
+            "🟢 مفعّل"
+            if colors_enabled
+            else
+            "⚪ مطفأ"
+        )
 
         text = (
             f"🛠 <b>لوحة تحكم المطور العامة</b>\n\n"
-            f"• حالة الاشتراك الإجباري للبوت: <b>{sub_status}</b>"
+            f"• حالة الاشتراك الإجباري للبوت: "
+            f"<b>{sub_status}</b>\n\n"
+            f"• حالة تلوين الأزرار: "
+            f"<b>{color_status}</b>"
         )
 
-        markup = InlineKeyboardMarkup(row_width=1)
+        markup = InlineKeyboardMarkup(
+            row_width=1
+        )
+
+        # -------------------------------------------------
+        # اشتراك البوت
+        # -------------------------------------------------
 
         if bot_sub_ch:
+
             markup.add(
                 InlineKeyboardButton(
                     "إيقاف اشتراك البوت الإجباري 🛑",
                     callback_data="disable_bot_sub",
-                    **{"style": "danger"}
+                    **button_style("danger")
                 )
             )
 
@@ -689,27 +1146,58 @@ def handle_callbacks(call):
                 InlineKeyboardButton(
                     "تغيير قناة اشتراك البوت 🔄",
                     callback_data="set_bot_sub",
-                    **{"style": "primary"}
+                    **button_style("primary")
                 )
             )
+
         else:
+
             markup.add(
                 InlineKeyboardButton(
                     "تعيين قناة اشتراك إجباري للبوت ➕",
                     callback_data="set_bot_sub",
-                    **{"style": "success"}
+                    **button_style("success")
                 )
             )
+
+        # -------------------------------------------------
+        # تلوين الأزرار
+        # -------------------------------------------------
+
+        if colors_enabled:
+
+            markup.add(
+                InlineKeyboardButton(
+                    "🎨 إيقاف تلوين الأزرار",
+                    callback_data="disable_button_colors",
+                    **button_style("danger")
+                )
+            )
+
+        else:
+
+            markup.add(
+                InlineKeyboardButton(
+                    "🎨 تشغيل تلوين الأزرار",
+                    callback_data="enable_button_colors",
+                    **button_style("success")
+                )
+            )
+
+        # -------------------------------------------------
+        # الرئيسية
+        # -------------------------------------------------
 
         markup.add(
             InlineKeyboardButton(
                 "القائمة الرئيسية 🔙",
                 callback_data="main_menu",
-                **{"style": "primary"}
+                **button_style("primary")
             )
         )
 
         try:
+
             bot.edit_message_text(
                 text,
                 call.message.chat.id,
@@ -717,7 +1205,9 @@ def handle_callbacks(call):
                 reply_markup=markup,
                 parse_mode="HTML"
             )
+
         except:
+
             bot.send_message(
                 call.message.chat.id,
                 text,
@@ -725,51 +1215,160 @@ def handle_callbacks(call):
                 parse_mode="HTML"
             )
 
-        bot.answer_callback_query(call.id)
+        bot.answer_callback_query(
+            call.id
+        )
 
-    elif call.data == "set_bot_sub":
-        if not is_developer(call.from_user):
-            bot.answer_callback_query(call.id, "مرفوض!", show_alert=True)
+    # =====================================================
+    # تشغيل التلوين
+    # =====================================================
+
+    elif call.data == "enable_button_colors":
+
+        if not is_developer(
+            call.from_user
+        ):
+
+            bot.answer_callback_query(
+                call.id,
+                "مرفوض!",
+                show_alert=True
+            )
+
             return
 
-        user_states[call.from_user.id] = "waiting_bot_sub_channel"
+        set_button_colors_enabled(
+            True
+        )
+
+        bot.answer_callback_query(
+            call.id,
+            "🎨 تم تشغيل تلوين الأزرار"
+        )
+
+        # إعادة فتح لوحة المطور حتى تتحدث الأزرار
+        call.data = "dev_panel"
+
+        handle_callbacks(
+            call
+        )
+
+    # =====================================================
+    # إيقاف التلوين
+    # =====================================================
+
+    elif call.data == "disable_button_colors":
+
+        if not is_developer(
+            call.from_user
+        ):
+
+            bot.answer_callback_query(
+                call.id,
+                "مرفوض!",
+                show_alert=True
+            )
+
+            return
+
+        set_button_colors_enabled(
+            False
+        )
+
+        bot.answer_callback_query(
+            call.id,
+            "⚪ تم إيقاف تلوين الأزرار"
+        )
+
+        # إعادة فتح لوحة المطور حتى تصبح الأزرار شفافة
+        call.data = "dev_panel"
+
+        handle_callbacks(
+            call
+        )
+
+    # =====================================================
+    # تعيين اشتراك البوت
+    # =====================================================
+
+    elif call.data == "set_bot_sub":
+
+        if not is_developer(
+            call.from_user
+        ):
+
+            bot.answer_callback_query(
+                call.id,
+                "مرفوض!",
+                show_alert=True
+            )
+
+            return
+
+        user_states[
+            call.from_user.id
+        ] = "waiting_bot_sub_channel"
 
         text = (
-            "📢 أرسل الآن يوزر القناة (مثلاً @ChannelName) "
-            "أو قم بتوجيه منشور منها، وتأكد من أن البوت مشرف فيها:"
+            "📢 أرسل الآن يوزر القناة "
+            "(مثلاً @ChannelName) "
+            "أو قم بتوجيه منشور منها، "
+            "وتأكد من أن البوت مشرف فيها:"
         )
 
         markup = InlineKeyboardMarkup()
+
         markup.add(
             InlineKeyboardButton(
                 "إلغاء ❌",
                 callback_data="dev_panel",
-                **{"style": "danger"}
+                **button_style("danger")
             )
         )
 
         try:
+
             bot.edit_message_text(
                 text,
                 call.message.chat.id,
                 call.message.message_id,
                 reply_markup=markup
             )
+
         except:
+
             bot.send_message(
                 call.message.chat.id,
                 text,
                 reply_markup=markup
             )
 
-        bot.answer_callback_query(call.id)
+        bot.answer_callback_query(
+            call.id
+        )
+
+    # =====================================================
+    # تعطيل الاشتراك
+    # =====================================================
 
     elif call.data == "disable_bot_sub":
-        if not is_developer(call.from_user):
-            bot.answer_callback_query(call.id, "مرفوض!", show_alert=True)
+
+        if not is_developer(
+            call.from_user
+        ):
+
+            bot.answer_callback_query(
+                call.id,
+                "مرفوض!",
+                show_alert=True
+            )
+
             return
 
-        set_bot_sub_channel("")
+        set_bot_sub_channel(
+            ""
+        )
+
         bot.answer_callback_query(
             call.id,
             "تم إيقاف اشتراك البوت الإجباري بنجاح",
@@ -777,8 +1376,22 @@ def handle_callbacks(call):
         )
 
         call.data = "dev_panel"
-        handle_callbacks(call)
+
+        handle_callbacks(
+            call
+        )
 
 
-print("بوت الاشتراك الإجباري يعمل الآن...")
-bot.infinity_polling(skip_pending=True, timeout=10, long_polling_timeout=5)
+# =========================================================
+# تشغيل البوت
+# =========================================================
+
+print(
+    "بوت الاشتراك الإجباري يعمل الآن..."
+)
+
+bot.infinity_polling(
+    skip_pending=True,
+    timeout=10,
+    long_polling_timeout=5
+    )
