@@ -1,4 +1,4 @@
-import sys
+mPjDSdE sys
 import os
 import time
 import subprocess
@@ -6,7 +6,7 @@ import telebot
 from telebot import types
 
 # ======= البيانات الأساسية ======= #
-BOT_TOKEN = '8177794176:AAF390geeHv0-87Bubl_bqKiDoH7mPjDSdE'
+BOT_TOKEN = '8877293036:AAGg_82F0bT1Bhov42sk9qDcRMsVNpfnErw'
 ADMIN_ID = 1920665874  # آيدي المالك
 DEV_USERNAME = 'u_8_y'
 CHANNEL_USERNAME = 'FD_CQ'
