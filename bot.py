@@ -3,7 +3,7 @@ import datetime
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-BOT_TOKEN = "8582451165:AAGVytO4wBe5mRPfkOQaDXhq1WSWmrb7KQs"
+BOT_TOKEN = "7659370064:AAFG8k9ctl9XlF8ddsSYaBFv76BzVuDKZ1g"
 DEVELOPER_USERNAME = "u_8_y"
 DEVELOPER_USERNAMES = ["u_8_y"]
 DEVELOPER_IDS = [750000000]
