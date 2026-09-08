@@ -111,7 +111,7 @@ def add_group_to_db(chat_id, chat_title, owner_id):
             VALUES (?, ?, ?, 0, '', ?, ?)
         ''', (chat_id, chat_title, owner_id, current_date, owner_id))
     else:
-        cursor.execute("UPDATE groups SET chat_title = ? WHERE chat_id = ?", (chat_title, chat_id))
+        cursor.execute("UPDATE groups SET chat_title = ? WHERE chat_id = ?", (chat_id,))
 
     conn.commit()
     conn.close()
@@ -224,7 +224,10 @@ def send_welcome(message):
 
     user_states.pop(user_id, None)
 
-    badge = " ⭐ [بوت مميز]" if is_premium else ""
+    # إضافة إيموجي نجمة متحركة مميزة للمستخدمين المميزين
+    animated_star = '<tg-emoji emoji-id="5465416081050935515">⭐</tg-emoji>'
+    badge = f" {animated_star} [بوت مميز]" if is_premium else ""
+
     text = (
         f"أهلاً {user_name}{badge}\n"
         f"• لاستخدام البوت يجب عليك التالي :-\n\n"
@@ -498,21 +501,21 @@ def handle_callbacks(call):
         if not is_developer(call.from_user):
             return
         user_states[user_id] = "edit_btn_add"
-        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'إضافة البوت':")
+        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'إضافة البوت' (يمكنك وضع وسم <tg-emoji> للإيموجي المتحرك):", parse_mode="HTML")
         bot.answer_callback_query(call.id)
 
     elif call.data == "set_btn_buy":
         if not is_developer(call.from_user):
             return
         user_states[user_id] = "edit_btn_buy_text"
-        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'شراء بوت':")
+        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'شراء بوت':", parse_mode="HTML")
         bot.answer_callback_query(call.id)
 
     elif call.data == "set_btn_dev":
         if not is_developer(call.from_user):
             return
         user_states[user_id] = "edit_btn_dev_text"
-        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'المطور':")
+        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'المطور':", parse_mode="HTML")
         bot.answer_callback_query(call.id)
 
     elif call.data == "set_bot_sub":
