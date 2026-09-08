@@ -1,13 +1,31 @@
-mPjDSdE sys
 import os
+import sys
 import time
 import subprocess
+from threading import Thread
+from flask import Flask
 import telebot
 from telebot import types
 
+# ======= إعداد السيرفر الوهمي لإبقاء البوت شغال 24 ساعة ======= #
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Server is running perfectly!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.daemon = True
+    t.start()
+
 # ======= البيانات الأساسية ======= #
 BOT_TOKEN = '8877293036:AAGg_82F0bT1Bhov42sk9qDcRMsVNpfnErw'
-ADMIN_ID = 1920665874  # آيدي المالك
+ADMIN_ID = 1920665874  # آيدي حسابك
 DEV_USERNAME = 'u_8_y'
 CHANNEL_USERNAME = 'FD_CQ'
 
@@ -17,14 +35,12 @@ bot = telebot.TeleBot(BOT_TOKEN)
 uploaded_dir = "uploaded_files"
 os.makedirs(uploaded_dir, exist_ok=True)
 
-# قاعدة بيانات النقاط والحالات
 user_points = {}
-user_states = {}
 
 def is_admin(user_id):
     return user_id == ADMIN_ID
 
-# ======= القائمة الرئيسية ======= #
+# ======= القائمة الرئيسية المطابقة للصورة ======= #
 def get_main_menu_markup():
     markup = types.InlineKeyboardMarkup(row_width=2)
     
@@ -64,7 +80,6 @@ def send_welcome(message):
     user_id = message.from_user.id
     first_name = message.from_user.first_name
     
-    user_states[user_id] = None
     if user_id not in user_points:
         user_points[user_id] = 55
 
@@ -79,53 +94,37 @@ def send_welcome(message):
         f"💰 **تكلفة الساعة:** {cost_text}\n\n"
         "👇 **اختر من القائمة أدناه:**"
     )
-    
-    bot.send_message(
-        message.chat.id, 
-        welcome_text, 
-        reply_markup=get_main_menu_markup(), 
-        parse_mode='Markdown'
-    )
+    bot.send_message(message.chat.id, welcome_text, reply_markup=get_main_menu_markup(), parse_mode='Markdown')
 
-# ======= معالجة الأزرار (Callback Queries) ======= #
+# ======= معالجة ضغطات الأزرار ======= #
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
     chat_id = call.message.chat.id
     user_id = call.from_user.id
     
     if call.data == 'upload_file':
-        user_states[user_id] = 'waiting_for_file'
-        
         if is_admin(user_id):
             pts_info = "👑 **الوضع: مالك البوت (الرفع مجاني بدون نقاط)**"
         else:
             pts_info = f"⚠️ **كل ساعة تشغيل = 10 نقطة.**\n💎 **نقاطك الحالية:** {user_points.get(user_id, 55)}"
 
-        upload_text = (
-            "📬 **أرسل ملف بايثون (.py) الآن.**\n\n"
-            f"{pts_info}"
-        )
+        upload_text = f"📬 **أرسل ملف بايثون (.py) الآن.**\n\n{pts_info}"
         
         back_markup = types.InlineKeyboardMarkup()
         back_markup.add(types.InlineKeyboardButton("⬅️ رجوع", callback_data='back_to_main'))
-        
         bot.send_message(chat_id, upload_text, reply_markup=back_markup, parse_mode='Markdown')
         bot.answer_callback_query(call.id)
 
     elif call.data == 'back_to_main':
-        user_states[user_id] = None
         send_welcome(call.message)
         bot.answer_callback_query(call.id)
 
     elif call.data == 'my_files':
         files = os.listdir(uploaded_dir)
-        if not files:
-            bot.send_message(chat_id, "📁 لا توجد ملفات مرفوعة حالياً.")
-        else:
-            msg = "📂 **الملفات المرفوعة والمشغلة:**\n\n" + "\n".join([f"• `{f}`" for f in files])
-            bot.send_message(chat_id, msg, parse_mode='Markdown')
+        msg = "📂 **الملفات المرفوعة والمشغلة:**\n\n" + "\n".join([f"• `{f}`" for f in files]) if files else "📁 لا توجد ملفات مرفوعة حالياً."
+        bot.send_message(chat_id, msg, parse_mode='Markdown')
         bot.answer_callback_query(call.id)
-        
+
     elif call.data == 'my_points':
         if is_admin(user_id):
             bot.send_message(chat_id, "👑 أنت مالك البوت، استخدامك مجاني وغير محدود!")
@@ -133,7 +132,7 @@ def handle_query(call):
             pts = user_points.get(user_id, 55)
             bot.send_message(chat_id, f"💎 رصيدك الحالي هو: **{pts} نقطة**", parse_mode='Markdown')
         bot.answer_callback_query(call.id)
-        
+
     elif call.data == 'daily_gift':
         user_points[user_id] = user_points.get(user_id, 55) + 10
         bot.answer_callback_query(call.id, "🎁 حصلت على 10 نقاط هدية يومية!", show_alert=True)
@@ -148,7 +147,6 @@ def handle_docs(message):
         bot.reply_to(message, "❌ يُسمح فقط برفع ملفات بايثون بصيغة `.py`.")
         return
 
-    # التحقق من النقاط فقط إذا لم يكن مالك البوت
     if not is_admin(user_id):
         pts = user_points.get(user_id, 55)
         if pts < 10:
@@ -156,7 +154,6 @@ def handle_docs(message):
             return
 
     try:
-        # تحميل وتخزين الملف
         file_info = bot.get_file(message.document.file_id)
         downloaded = bot.download_file(file_info.file_path)
         file_path = os.path.join(uploaded_dir, file_name)
@@ -164,32 +161,24 @@ def handle_docs(message):
         with open(file_path, 'wb') as f:
             f.write(downloaded)
 
-        user_states[user_id] = None
-
         if is_admin(user_id):
-            msg_reply = (
-                f"👑 **مرحباً بالمالك! تم استلام وتفعيل الملف `{file_name}` بنجاح!**\n"
-                "🚀 **جاري تشغيل البوت في الخلفية (مجاناً بدون خصم)...**"
-            )
+            msg_reply = f"👑 **مرحباً بالمالك! تم استلام وتفعيل الملف `{file_name}` بنجاح!**\n🚀 **جاري تشغيل البوت في الخلفية (مجاناً)...**"
         else:
             user_points[user_id] -= 10
-            msg_reply = (
-                f"✅ **تم استلام الملف `{file_name}` بنجاح!**\n"
-                "🚀 **جاري تشغيل البوت المرفوع في الخلفية الآن...**\n\n"
-                f"💎 **باقي نقاطك:** {user_points[user_id]} نقطة."
-            )
+            msg_reply = f"✅ **تم استلام الملف `{file_name}` بنجاح!**\n🚀 **جاري تشغيله في الخلفية...**\n\n💎 **باقي نقاطك:** {user_points[user_id]} نقطة."
 
         bot.reply_to(message, msg_reply, parse_mode='Markdown')
         
-        # تشغيل ملف بايثون كعملية جديدة مستمرة
+        # تشغيل الملف
         subprocess.Popen([sys.executable, file_path])
 
     except Exception as e:
         bot.reply_to(message, f"❌ حدث خطأ أثناء رفع وتفعيل الملف: {e}")
 
-# ======= تشغيل البوت المستمر ======= #
+# ======= التشغيل الرئيسي ======= #
 if __name__ == '__main__':
-    print("🤖 البوت يعمل بنجاح...")
+    keep_alive()
+    print("🤖 البوت يعمل بنجاح ومستقر...")
     while True:
         try:
             bot.polling(none_stop=True, timeout=60)
