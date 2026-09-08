@@ -1,4 +1,4 @@
- import os
+import os
 import sys
 import re
 import time
@@ -277,7 +277,6 @@ def start_cmd(message):
             create_emoji_btn("رفض", callback_data=f'reject_{user_id}', emoji_id=E['cross'], color="danger")
         )
         
-        # إشعار الأدمن بالطلب مباشرة
         try:
             bot.send_message(
                 ADMIN_ID,
@@ -550,7 +549,6 @@ def manage_users_view(call):
 
     markup = types.InlineKeyboardMarkup()
     
-    # إضافة الأزرار لكل طلب معلق
     for uid, fname, uname in pending_list:
         clean_fname = escape_html(fname or 'مستخدم')
         markup.add(
