@@ -4,25 +4,17 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 BOT_TOKEN = "7659370064:AAFG8k9ctl9XlF8ddsSYaBFv76BzVuDKZ1g"
-DEVELOPER_USERNAME = "u_8_y"
 DEVELOPER_USERNAMES = ["u_8_y"]
 DEVELOPER_IDS = [750000000]
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 user_states = {}
 
-
-class StyledInlineKeyboardButton(InlineKeyboardButton):
-    def __init__(self, text, url=None, callback_data=None, style=None, **kwargs):
-        super().__init__(text, url=url, callback_data=callback_data, **kwargs)
-        if style:
-            self.style = style
-
-    def to_dict(self):
-        data = super().to_dict()
-        if hasattr(self, 'style') and self.style:
-            data['style'] = self.style
-        return data
+# معرفات الإيموجيات المتحركة والمميزة
+EMOJI_SPARKLES = '<tg-emoji emoji-id="5425000253013142273">✨</tg-emoji>'
+EMOJI_BULB = '<tg-emoji emoji-id="5425114782074186522">💡</tg-emoji>'
+EMOJI_FIRE = '<tg-emoji emoji-id="5425091726983342371">🔥</tg-emoji>'
+EMOJI_DIAMOND = '<tg-emoji emoji-id="5425121654005082189">💎</tg-emoji>'
 
 
 def init_db():
@@ -51,10 +43,10 @@ def init_db():
     default_settings = {
         'bot_sub_channel': '',
         'is_premium_bot': '0',
-        'btn_add_text': 'اضفني الى مجموعتك +',
-        'btn_buy_text': 'شراء بوت ↗',
+        'btn_add_text': f'اضفني الى مجموعتك {EMOJI_SPARKLES}',
+        'btn_buy_text': f'شراء بوت {EMOJI_DIAMOND}',
         'btn_buy_url': 'https://t.me/u_8_y',
-        'btn_dev_text': 'المطور ↗',
+        'btn_dev_text': f'المطور {EMOJI_FIRE}',
         'btn_dev_url': 'https://t.me/u_8_y'
     }
 
@@ -157,31 +149,29 @@ def parse_channel_input(message):
 def main_menu(user=None):
     markup = InlineKeyboardMarkup()
 
-    btn_add_text = get_setting('btn_add_text', 'اضفني الى مجموعتك +')
-    btn_buy_text = get_setting('btn_buy_text', 'شراء بوت ↗')
+    btn_add_text = get_setting('btn_add_text', f'اضفني الى مجموعتك {EMOJI_SPARKLES}')
+    btn_buy_text = get_setting('btn_buy_text', f'شراء بوت {EMOJI_DIAMOND}')
     btn_buy_url = get_setting('btn_buy_url', 'https://t.me/u_8_y')
-    btn_dev_text = get_setting('btn_dev_text', 'المطور ↗')
+    btn_dev_text = get_setting('btn_dev_text', f'المطور {EMOJI_FIRE}')
     btn_dev_url = get_setting('btn_dev_url', 'https://t.me/u_8_y')
 
     markup.add(
-        StyledInlineKeyboardButton(
+        InlineKeyboardButton(
             btn_add_text,
-            url=f"http://t.me/{bot.get_me().username}?startgroup=true",
-            style="primary"
+            url=f"http://t.me/{bot.get_me().username}?startgroup=true"
         )
     )
 
     markup.row(
-        StyledInlineKeyboardButton(btn_buy_text, url=btn_buy_url, style="success"),
-        StyledInlineKeyboardButton(btn_dev_text, url=btn_dev_url, style="primary")
+        InlineKeyboardButton(btn_buy_text, url=btn_buy_url),
+        InlineKeyboardButton(btn_dev_text, url=btn_dev_url)
     )
 
     if user and is_developer(user):
         markup.add(
-            StyledInlineKeyboardButton(
-                "لوحة تحكم المطور 🛠",
-                callback_data="dev_panel",
-                style="danger"
+            InlineKeyboardButton(
+                "🛠 لوحة تحكم المطور",
+                callback_data="dev_panel"
             )
         )
 
@@ -196,7 +186,6 @@ def send_welcome(message):
     user_id = message.from_user.id
     user_name = message.from_user.first_name if message.from_user.first_name else "مستخدم"
     bot_sub_ch = get_setting('bot_sub_channel', '')
-    is_premium = get_setting('is_premium_bot', '0') == '1'
 
     if bot_sub_ch and not is_developer(message.from_user):
         try:
@@ -214,8 +203,8 @@ def send_welcome(message):
                 warning_text = "• يجب عليك الاشتراك بالقنوات التالية لاستخدام البوت :"
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(StyledInlineKeyboardButton(channel_title, url=ch_link, style="primary"))
-                markup.add(StyledInlineKeyboardButton("اشتريت ✅", callback_data="check_bot_sub", style="success"))
+                markup.add(InlineKeyboardButton(channel_title, url=ch_link))
+                markup.add(InlineKeyboardButton("اشتريت ✅", callback_data="check_bot_sub"))
 
                 bot.send_message(message.chat.id, warning_text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
                 return
@@ -224,14 +213,10 @@ def send_welcome(message):
 
     user_states.pop(user_id, None)
 
-    # إضافة إيموجي نجمة متحركة مميزة للمستخدمين المميزين
-    animated_star = '<tg-emoji emoji-id="5465416081050935515">⭐</tg-emoji>'
-    badge = f" {animated_star} [بوت مميز]" if is_premium else ""
-
     text = (
-        f"أهلاً {user_name}{badge}\n"
-        f"• لاستخدام البوت يجب عليك التالي :-\n\n"
-        f"- أضف البوت للمجموعة ورفعه مشرفاً ثم أرسل ( تفعيل ) ثم تابع التعليمات التي يرسلها البوت.\n\n"
+        f"أهلاً {user_name} {EMOJI_SPARKLES}\n"
+        f"لاستخدام البوت يجب عليك التالي {EMOJI_BULB} :-\n\n"
+        f"- أضف البوت للمجموعة ورفعه مشرفاً ثم اضغط على زر التفعيل أو أرسل ( تفعيل ) ثم تابع التعليمات التي يرسلها البوت.\n\n"
         f"- لإيقاف البوت ارسل : ( تعطيل ) في المجموعة."
     )
 
@@ -339,7 +324,7 @@ def check_group_messages(message):
                 )
 
                 markup = InlineKeyboardMarkup()
-                markup.add(StyledInlineKeyboardButton(channel_title, url=ch_link, style="primary"))
+                markup.add(InlineKeyboardButton(channel_title, url=ch_link))
 
                 bot.send_message(message.chat.id, warning_text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
                 return
@@ -368,12 +353,12 @@ def handle_private_messages(message):
                 user_states.pop(user_id, None)
 
                 markup = InlineKeyboardMarkup()
-                markup.add(StyledInlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel", style="primary"))
+                markup.add(InlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel"))
                 bot.reply_to(message, f"<b>✅ تم ضبط قناة الاشتراك الإجباري للبوت بنجاح: {channel}</b>", reply_markup=markup, parse_mode="HTML")
                 return
             except Exception:
                 markup = InlineKeyboardMarkup()
-                markup.add(StyledInlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel", style="primary"))
+                markup.add(InlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel"))
                 bot.reply_to(message, "❌ فشل تعيين القناة. تأكد من أن البوت مشرف فيها!", reply_markup=markup)
                 return
 
@@ -451,17 +436,16 @@ def handle_callbacks(call):
         markup = InlineKeyboardMarkup(row_width=1)
 
         if bot_sub_ch:
-            markup.add(StyledInlineKeyboardButton("إيقاف اشتراك البوت الإجباري 🛑", callback_data="disable_bot_sub", style="danger"))
-            markup.add(StyledInlineKeyboardButton("تغيير قناة اشتراك البوت 🔄", callback_data="set_bot_sub", style="primary"))
+            markup.add(InlineKeyboardButton("إيقاف اشتراك البوت الإجباري 🛑", callback_data="disable_bot_sub"))
+            markup.add(InlineKeyboardButton("تغيير قناة اشتراك البوت 🔄", callback_data="set_bot_sub"))
         else:
-            markup.add(StyledInlineKeyboardButton("تعيين قناة اشتراك إجباري للبوت ➕", callback_data="set_bot_sub", style="success"))
+            markup.add(InlineKeyboardButton("تعيين قناة اشتراك إجباري للبوت ➕", callback_data="set_bot_sub"))
 
         prem_btn_text = "تعطيل وضع البوت المميز ✖" if is_premium else "تفعيل وضع البوت المميز ⭐"
-        prem_btn_style = "danger" if is_premium else "success"
-        markup.add(StyledInlineKeyboardButton(prem_btn_text, callback_data="toggle_premium", style=prem_btn_style))
+        markup.add(InlineKeyboardButton(prem_btn_text, callback_data="toggle_premium"))
 
-        markup.add(StyledInlineKeyboardButton("تعديل الأزرار والنصوص ✏️", callback_data="edit_buttons_menu", style="primary"))
-        markup.add(StyledInlineKeyboardButton("القائمة الرئيسية 🔙", callback_data="main_menu", style="primary"))
+        markup.add(InlineKeyboardButton("تعديل الأزرار والنصوص ✏️", callback_data="edit_buttons_menu"))
+        markup.add(InlineKeyboardButton("القائمة الرئيسية 🔙", callback_data="main_menu"))
 
         try:
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="HTML")
@@ -487,21 +471,23 @@ def handle_callbacks(call):
         text = "⚙️ <b>قسم تعديل الأزرار الرئيسية:</b>\n\nاختر الزر الذي تريد تعديل نصّه أو رابطه:"
         markup = InlineKeyboardMarkup(row_width=1)
 
-        markup.add(StyledInlineKeyboardButton("تعديل زر 'إضافة البوت' ➕", callback_data="set_btn_add", style="primary"))
-        markup.add(StyledInlineKeyboardButton("تعديل زر 'شراء بوت' 🛍", callback_data="set_btn_buy", style="success"))
-        markup.add(StyledInlineKeyboardButton("تعديل زر 'المطور' 👨‍💻", callback_data="set_btn_dev", style="primary"))
-        markup.add(StyledInlineKeyboardButton("رجوع 🔙", callback_data="dev_panel", style="danger"))
+        markup.add(InlineKeyboardButton("تعديل زر 'إضافة البوت' ➕", callback_data="set_btn_add"))
+        markup.add(InlineKeyboardButton("تعديل زر 'شراء بوت' 🛍", callback_data="set_btn_buy"))
+        markup.add(InlineKeyboardButton("تعديل زر 'المطور' 👨‍💻", callback_data="set_btn_dev"))
+        markup.add(InlineKeyboardButton("رجوع 🔙", callback_data="dev_panel"))
 
         try:
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="HTML")
         except:
             bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode="HTML")
 
+        bot.answer_callback_query(call.id)
+
     elif call.data == "set_btn_add":
         if not is_developer(call.from_user):
             return
         user_states[user_id] = "edit_btn_add"
-        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'إضافة البوت' (يمكنك وضع وسم <tg-emoji> للإيموجي المتحرك):", parse_mode="HTML")
+        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'إضافة البوت':", parse_mode="HTML")
         bot.answer_callback_query(call.id)
 
     elif call.data == "set_btn_buy":
@@ -524,7 +510,7 @@ def handle_callbacks(call):
         user_states[user_id] = "waiting_bot_sub_channel"
         text = "📢 أرسل الآن يوزر القناة (مثلاً @ChannelName) أو قم بتوجيه منشور منها:"
         markup = InlineKeyboardMarkup()
-        markup.add(StyledInlineKeyboardButton("إلغاء ❌", callback_data="dev_panel", style="danger"))
+        markup.add(InlineKeyboardButton("إلغاء ❌", callback_data="dev_panel"))
         try:
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
         except:
@@ -545,6 +531,7 @@ def handle_callbacks(call):
         except:
             pass
         send_welcome(call.message)
+        bot.answer_callback_query(call.id)
 
 
 print("بوت الاشتراك الإجباري يعمل الآن...")
