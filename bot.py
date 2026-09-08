@@ -131,7 +131,6 @@ def parse_channel_input(message):
 def main_menu(user=None):
     markup = InlineKeyboardMarkup()
 
-    # زر أزرق (Primary) - إضافة البوت
     btn1 = InlineKeyboardButton(
         "اضفني الى مجموعتك +",
         url=f"http://t.me/{bot.get_me().username}?startgroup=true"
@@ -139,7 +138,6 @@ def main_menu(user=None):
     btn1.style = "primary"
     markup.add(btn1)
 
-    # صف يحتوي على زر أخضر (Success) وزر أزرق (Primary)
     btn2 = InlineKeyboardButton(
         "شراء بوت ↗",
         url="https://t.me/u_8_y"
@@ -154,7 +152,6 @@ def main_menu(user=None):
 
     markup.row(btn2, btn3)
 
-    # زر أحمر (Danger) - يظهر للمطور فقط
     if user and is_developer(user):
         btn4 = InlineKeyboardButton(
             "لوحة تحكم المطور 🛠",
@@ -442,7 +439,7 @@ def handle_callbacks(call):
 
     elif call.data == "disable_bot_sub":
         if not is_developer(call.from_user):
-            bot.answer_callback_query(call.id, "مرفوض!", show_alert=You can skip)
+            bot.answer_callback_query(call.id, "مرفوض!", show_alert=True)
             return
 
         set_bot_sub_channel("")
