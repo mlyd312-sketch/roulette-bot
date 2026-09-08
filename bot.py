@@ -48,6 +48,19 @@ def init_db():
         )
     ''')
 
+    default_settings = {
+        'bot_sub_channel': '',
+        'is_premium_bot': '0',
+        'btn_add_text': 'اضفني الى مجموعتك +',
+        'btn_buy_text': 'شراء بوت ↗',
+        'btn_buy_url': 'https://t.me/u_8_y',
+        'btn_dev_text': 'المطور ↗',
+        'btn_dev_url': 'https://t.me/u_8_y'
+    }
+
+    for key, val in default_settings.items():
+        cursor.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)", (key, val))
+
     try:
         cursor.execute("ALTER TABLE groups ADD COLUMN added_by INTEGER DEFAULT 0")
     except:
@@ -60,19 +73,19 @@ def init_db():
 init_db()
 
 
-def get_bot_sub_channel():
+def get_setting(key, default=""):
     conn = sqlite3.connect('bot_database.db', check_same_thread=False)
     cursor = conn.cursor()
-    cursor.execute("SELECT value FROM bot_settings WHERE key = 'bot_sub_channel'")
+    cursor.execute("SELECT value FROM bot_settings WHERE key = ?", (key,))
     row = cursor.fetchone()
     conn.close()
-    return row[0] if row else ""
+    return row[0] if row else default
 
 
-def set_bot_sub_channel(channel):
+def set_setting(key, value):
     conn = sqlite3.connect('bot_database.db', check_same_thread=False)
     cursor = conn.cursor()
-    cursor.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", ('bot_sub_channel', channel))
+    cursor.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)", (key, str(value)))
     conn.commit()
     conn.close()
 
@@ -144,30 +157,25 @@ def parse_channel_input(message):
 def main_menu(user=None):
     markup = InlineKeyboardMarkup()
 
-    # زر أزرق
+    btn_add_text = get_setting('btn_add_text', 'اضفني الى مجموعتك +')
+    btn_buy_text = get_setting('btn_buy_text', 'شراء بوت ↗')
+    btn_buy_url = get_setting('btn_buy_url', 'https://t.me/u_8_y')
+    btn_dev_text = get_setting('btn_dev_text', 'المطور ↗')
+    btn_dev_url = get_setting('btn_dev_url', 'https://t.me/u_8_y')
+
     markup.add(
         StyledInlineKeyboardButton(
-            "اضفني الى مجموعتك +",
+            btn_add_text,
             url=f"http://t.me/{bot.get_me().username}?startgroup=true",
             style="primary"
         )
     )
 
-    # زر أخضر + زر أزرق
     markup.row(
-        StyledInlineKeyboardButton(
-            "شراء بوت ↗",
-            url="https://t.me/u_8_y",
-            style="success"
-        ),
-        StyledInlineKeyboardButton(
-            "المطور ↗",
-            url="https://t.me/u_8_y",
-            style="primary"
-        )
+        StyledInlineKeyboardButton(btn_buy_text, url=btn_buy_url, style="success"),
+        StyledInlineKeyboardButton(btn_dev_text, url=btn_dev_url, style="primary")
     )
 
-    # زر أحمر للمطور
     if user and is_developer(user):
         markup.add(
             StyledInlineKeyboardButton(
@@ -187,7 +195,8 @@ def send_welcome(message):
 
     user_id = message.from_user.id
     user_name = message.from_user.first_name if message.from_user.first_name else "مستخدم"
-    bot_sub_ch = get_bot_sub_channel()
+    bot_sub_ch = get_setting('bot_sub_channel', '')
+    is_premium = get_setting('is_premium_bot', '0') == '1'
 
     if bot_sub_ch and not is_developer(message.from_user):
         try:
@@ -205,12 +214,8 @@ def send_welcome(message):
                 warning_text = "• يجب عليك الاشتراك بالقنوات التالية لاستخدام البوت :"
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(
-                    StyledInlineKeyboardButton(channel_title, url=ch_link, style="primary")
-                )
-                markup.add(
-                    StyledInlineKeyboardButton("اشتريت ✅", callback_data="check_bot_sub", style="success")
-                )
+                markup.add(StyledInlineKeyboardButton(channel_title, url=ch_link, style="primary"))
+                markup.add(StyledInlineKeyboardButton("اشتريت ✅", callback_data="check_bot_sub", style="success"))
 
                 bot.send_message(message.chat.id, warning_text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
                 return
@@ -219,8 +224,9 @@ def send_welcome(message):
 
     user_states.pop(user_id, None)
 
+    badge = " ⭐ [بوت مميز]" if is_premium else ""
     text = (
-        f"أهلاً {user_name}\n"
+        f"أهلاً {user_name}{badge}\n"
         f"• لاستخدام البوت يجب عليك التالي :-\n\n"
         f"- أضف البوت للمجموعة ورفعه مشرفاً ثم أرسل ( تفعيل ) ثم تابع التعليمات التي يرسلها البوت.\n\n"
         f"- لإيقاف البوت ارسل : ( تعطيل ) في المجموعة."
@@ -330,9 +336,7 @@ def check_group_messages(message):
                 )
 
                 markup = InlineKeyboardMarkup()
-                markup.add(
-                    StyledInlineKeyboardButton(channel_title, url=ch_link, style="primary")
-                )
+                markup.add(StyledInlineKeyboardButton(channel_title, url=ch_link, style="primary"))
 
                 bot.send_message(message.chat.id, warning_text, reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
                 return
@@ -345,8 +349,10 @@ def handle_private_messages(message):
     user_id = message.from_user.id
 
     if user_id in user_states:
-        state_data = user_states[user_id]
-        if state_data == "waiting_bot_sub_channel":
+        state = user_states[user_id]
+        text_input = message.text.strip() if message.text else ""
+
+        if state == "waiting_bot_sub_channel":
             channel = parse_channel_input(message)
             bot_info = bot.get_me()
 
@@ -355,30 +361,56 @@ def handle_private_messages(message):
                 if member.status in ['left', 'kicked']:
                     raise Exception("BOT_NOT_ADMIN")
 
-                set_bot_sub_channel(str(channel))
+                set_setting('bot_sub_channel', str(channel))
                 user_states.pop(user_id, None)
 
                 markup = InlineKeyboardMarkup()
-                markup.add(
-                    StyledInlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel", style="primary")
-                )
-
+                markup.add(StyledInlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel", style="primary"))
                 bot.reply_to(message, f"<b>✅ تم ضبط قناة الاشتراك الإجباري للبوت بنجاح: {channel}</b>", reply_markup=markup, parse_mode="HTML")
                 return
             except Exception:
                 markup = InlineKeyboardMarkup()
-                markup.add(
-                    StyledInlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel", style="primary")
-                )
-
+                markup.add(StyledInlineKeyboardButton("لوحة التحكم 🔙", callback_data="dev_panel", style="primary"))
                 bot.reply_to(message, "❌ فشل تعيين القناة. تأكد من أن البوت مشرف فيها!", reply_markup=markup)
                 return
+
+        elif state == "edit_btn_add":
+            set_setting('btn_add_text', text_input)
+            user_states.pop(user_id, None)
+            bot.reply_to(message, "<b>✅ تم تغيير نص زر إدخال البوت بنجاح!</b>", parse_mode="HTML")
+            return
+
+        elif state == "edit_btn_buy_text":
+            set_setting('btn_buy_text', text_input)
+            user_states[user_id] = "edit_btn_buy_url"
+            bot.reply_to(message, "<b>✅ تم التعديل. الآن أرسل الرابط الجديد لزر الشراء:</b>", parse_mode="HTML")
+            return
+
+        elif state == "edit_btn_buy_url":
+            set_setting('btn_buy_url', text_input)
+            user_states.pop(user_id, None)
+            bot.reply_to(message, "<b>✅ تم تعديل رابط زر الشراء بنجاح!</b>", parse_mode="HTML")
+            return
+
+        elif state == "edit_btn_dev_text":
+            set_setting('btn_dev_text', text_input)
+            user_states[user_id] = "edit_btn_dev_url"
+            bot.reply_to(message, "<b>✅ تم التعديل. الآن أرسل الرابط الجديد لزر المطور:</b>", parse_mode="HTML")
+            return
+
+        elif state == "edit_btn_dev_url":
+            set_setting('btn_dev_url', text_input)
+            user_states.pop(user_id, None)
+            bot.reply_to(message, "<b>✅ تم تعديل رابط زر المطور بنجاح!</b>", parse_mode="HTML")
+            return
 
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
+    user_id = call.from_user.id
+
     if call.data == "check_bot_sub":
-        bot_sub_ch = get_bot_sub_channel()
+        bot_sub_ch = get_setting('bot_sub_channel', '')
         if bot_sub_ch:
             try:
                 member_status = bot.get_chat_member(bot_sub_ch, call.from_user.id)
@@ -401,28 +433,32 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id, "هذه القائمة خاصة بالمطور فقط!", show_alert=True)
             return
 
-        user_states.pop(call.from_user.id, None)
-        bot_sub_ch = get_bot_sub_channel()
-        sub_status = f"مفعلة ({bot_sub_ch})" if bot_sub_ch else "معطلة"
+        user_states.pop(user_id, None)
+        bot_sub_ch = get_setting('bot_sub_channel', '')
+        is_premium = get_setting('is_premium_bot', '0') == '1'
 
-        text = f"🛠 <b>لوحة تحكم المطور العامة</b>\n\n• حالة الاشتراك الإجباري للبوت: <b>{sub_status}</b>"
+        sub_status = f"مفعلة ({bot_sub_ch})" if bot_sub_ch else "معطلة"
+        prem_status = "مفعل ⭐" if is_premium else "معطل"
+
+        text = (
+            f"🛠 <b>لوحة تحكم المطور العامة</b>\n\n"
+            f"• حالة الاشتراك الإجباري للبوت: <b>{sub_status}</b>\n"
+            f"• وضع البوت المميز: <b>{prem_status}</b>"
+        )
         markup = InlineKeyboardMarkup(row_width=1)
 
         if bot_sub_ch:
-            markup.add(
-                StyledInlineKeyboardButton("إيقاف اشتراك البوت الإجباري 🛑", callback_data="disable_bot_sub", style="danger")
-            )
-            markup.add(
-                StyledInlineKeyboardButton("تغيير قناة اشتراك البوت 🔄", callback_data="set_bot_sub", style="primary")
-            )
+            markup.add(StyledInlineKeyboardButton("إيقاف اشتراك البوت الإجباري 🛑", callback_data="disable_bot_sub", style="danger"))
+            markup.add(StyledInlineKeyboardButton("تغيير قناة اشتراك البوت 🔄", callback_data="set_bot_sub", style="primary"))
         else:
-            markup.add(
-                StyledInlineKeyboardButton("تعيين قناة اشتراك إجباري للبوت ➕", callback_data="set_bot_sub", style="success")
-            )
+            markup.add(StyledInlineKeyboardButton("تعيين قناة اشتراك إجباري للبوت ➕", callback_data="set_bot_sub", style="success"))
 
-        markup.add(
-            StyledInlineKeyboardButton("القائمة الرئيسية 🔙", callback_data="main_menu", style="primary")
-        )
+        prem_btn_text = "تعطيل وضع البوت المميز ✖" if is_premium else "تفعيل وضع البوت المميز ⭐"
+        prem_btn_style = "danger" if is_premium else "success"
+        markup.add(StyledInlineKeyboardButton(prem_btn_text, callback_data="toggle_premium", style=prem_btn_style))
+
+        markup.add(StyledInlineKeyboardButton("تعديل الأزرار والنصوص ✏️", callback_data="edit_buttons_menu", style="primary"))
+        markup.add(StyledInlineKeyboardButton("القائمة الرئيسية 🔙", callback_data="main_menu", style="primary"))
 
         try:
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="HTML")
@@ -431,35 +467,81 @@ def handle_callbacks(call):
 
         bot.answer_callback_query(call.id)
 
-    elif call.data == "set_bot_sub":
+    elif call.data == "toggle_premium":
         if not is_developer(call.from_user):
-            bot.answer_callback_query(call.id, "مرفوض!", show_alert=True)
+            return
+        curr = get_setting('is_premium_bot', '0')
+        new_val = '0' if curr == '1' else '1'
+        set_setting('is_premium_bot', new_val)
+        bot.answer_callback_query(call.id, "تم تغيير حالة البوت المميز!")
+        call.data = "dev_panel"
+        handle_callbacks(call)
+
+    elif call.data == "edit_buttons_menu":
+        if not is_developer(call.from_user):
             return
 
-        user_states[call.from_user.id] = "waiting_bot_sub_channel"
-        text = "📢 أرسل الآن يوزر القناة (مثلاً @ChannelName) أو قم بتوجيه منشور منها، وتأكد من أن البوت مشرف فيها:"
-        
-        markup = InlineKeyboardMarkup()
-        markup.add(
-            StyledInlineKeyboardButton("إلغاء ❌", callback_data="dev_panel", style="danger")
-        )
+        text = "⚙️ <b>قسم تعديل الأزرار الرئيسية:</b>\n\nاختر الزر الذي تريد تعديل نصّه أو رابطه:"
+        markup = InlineKeyboardMarkup(row_width=1)
 
+        markup.add(StyledInlineKeyboardButton("تعديل زر 'إضافة البوت' ➕", callback_data="set_btn_add", style="primary"))
+        markup.add(StyledInlineKeyboardButton("تعديل زر 'شراء بوت' 🛍", callback_data="set_btn_buy", style="success"))
+        markup.add(StyledInlineKeyboardButton("تعديل زر 'المطور' 👨‍💻", callback_data="set_btn_dev", style="primary"))
+        markup.add(StyledInlineKeyboardButton("رجوع 🔙", callback_data="dev_panel", style="danger"))
+
+        try:
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="HTML")
+        except:
+            bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode="HTML")
+
+    elif call.data == "set_btn_add":
+        if not is_developer(call.from_user):
+            return
+        user_states[user_id] = "edit_btn_add"
+        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'إضافة البوت':")
+        bot.answer_callback_query(call.id)
+
+    elif call.data == "set_btn_buy":
+        if not is_developer(call.from_user):
+            return
+        user_states[user_id] = "edit_btn_buy_text"
+        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'شراء بوت':")
+        bot.answer_callback_query(call.id)
+
+    elif call.data == "set_btn_dev":
+        if not is_developer(call.from_user):
+            return
+        user_states[user_id] = "edit_btn_dev_text"
+        bot.send_message(call.message.chat.id, "أرسل النص الجديد لزر 'المطور':")
+        bot.answer_callback_query(call.id)
+
+    elif call.data == "set_bot_sub":
+        if not is_developer(call.from_user):
+            return
+        user_states[user_id] = "waiting_bot_sub_channel"
+        text = "📢 أرسل الآن يوزر القناة (مثلاً @ChannelName) أو قم بتوجيه منشور منها:"
+        markup = InlineKeyboardMarkup()
+        markup.add(StyledInlineKeyboardButton("إلغاء ❌", callback_data="dev_panel", style="danger"))
         try:
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
         except:
             bot.send_message(call.message.chat.id, text, reply_markup=markup)
-
         bot.answer_callback_query(call.id)
 
     elif call.data == "disable_bot_sub":
         if not is_developer(call.from_user):
-            bot.answer_callback_query(call.id, "مرفوض!", show_alert=True)
             return
-
-        set_bot_sub_channel("")
+        set_setting('bot_sub_channel', '')
         bot.answer_callback_query(call.id, "تم إيقاف اشتراك البوت الإجباري بنجاح", show_alert=True)
         call.data = "dev_panel"
         handle_callbacks(call)
+
+    elif call.data == "main_menu":
+        try:
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except:
+            pass
+        send_welcome(call.message)
 
 
 print("بوت الاشتراك الإجباري يعمل الآن...")
