@@ -45,27 +45,23 @@ E = {
 }
 
 def ce(emoji_key: str, default_icon: str = "✨") -> str:
-    """تحويل مفتاح الإيموجي إلى وسم HTML مدعوم في تيليجرام"""
     emoji_id = E.get(emoji_key)
     if emoji_id:
         return f'<tg-emoji emoji-id="{emoji_id}">{default_icon}</tg-emoji>'
     return default_icon
 
 def strip_emoji_from_text(text: str) -> str:
-    """تنظيف النصوص المخصصة للأزرار من الإيموجيات العادية"""
     emoji_pattern = re.compile(
         r'[\U00010000-\U0010ffff]|[\u2600-\u27BF]|[\uFE00-\uFE0F]|[\u2300-\u23FF]'
     )
     return emoji_pattern.sub('', text).strip()
 
 def escape_html(text: str) -> str:
-    """حماية نصوص HTML من كسر التنسيق"""
     if not text:
         return ""
     return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 def create_emoji_btn(text, callback_data=None, url=None, emoji_id=None, color="primary"):
-    """إنشاء زر ملون يحمل إيموجي مميز"""
     clean_text = strip_emoji_from_text(text)
     btn_kwargs = {'text': clean_text}
     if callback_data:
@@ -107,7 +103,6 @@ MAX_FILE_SIZE = 5 * 1024 * 1024
 bot = telebot.TeleBot(BOT_TOKEN)
 executor = ThreadPoolExecutor(max_workers=10)
 
-# حالة النظام
 protection_enabled = True
 protection_level = "medium"
 bot_running = True
@@ -191,29 +186,15 @@ def get_stats():
         pending_count = cursor.fetchone()[0]
         return approved_count, pending_count
 
-# ======= تتبع العمليات الشغالة والمحادثات التفاعلية ======= #
-active_processes = {}  # {id_key: {'process': proc, 'chat_id': chat_id, 'filename': filename, 'type': 'pexpect'}}
-user_interactive_sessions = {}  # {chat_id: {'process': pexpect_child, 'state': 'running'/'waiting_input'}}
+# ======= تتبع العمليات والمحادثات التفاعلية المتعددة ======= #
+active_processes = {}  # {proc_id: {'process': child, 'chat_id': chat_id, 'filename': script_name}}
+active_user_inputs = {} # {chat_id: proc_id} لتحديد السكربت الحالي الذي ينتظر مدخلات من المستخدم
 
 def start_script_process(script_path, chat_id, user_id):
     script_name = os.path.basename(script_path)
-    
-    # التحقق من وجود ملف شغال مسبقاً للمستخدمين العاديين
-    if not is_admin(user_id):
-        for key, proc_info in list(active_processes.items()):
-            if proc_info['chat_id'] == chat_id:
-                proc = proc_info['process']
-                is_alive = proc.isalive() if proc_info['type'] == 'pexpect' else proc.poll() is None
-                if is_alive:
-                    bot.send_message(
-                        chat_id, 
-                        f"{ce('warning')} يوجد ملف قيد التشغيل بالفعل: <code>{escape_html(proc_info['filename'])}</code>\n\nيُسمح لك بتشغيل ملف واحد فقط بنفس الوقت.", 
-                        parse_mode='HTML'
-                    )
-                    return
 
     try:
-        # تشغيل الملف بوضع غير مخبأ (-u) لإرسال المخرجات فوراً بدون انتظار buffers
+        # تشغيل السكربت بوضع Unbuffered (-u) لضمان إرسال المخرجات فوراً
         child = pexpect.spawn(f"{sys.executable} -u {script_path}", encoding='utf-8', timeout=None)
         proc_id = id(child)
         
@@ -221,14 +202,7 @@ def start_script_process(script_path, chat_id, user_id):
             'process': child,
             'chat_id': chat_id,
             'filename': script_name,
-            'type': 'pexpect'
-        }
-        
-        user_interactive_sessions[chat_id] = {
-            'process': child,
-            'filename': script_name,
-            'state': 'running',
-            'proc_id': proc_id
+            'state': 'running'
         }
 
         markup = types.InlineKeyboardMarkup()
@@ -242,60 +216,61 @@ def start_script_process(script_path, chat_id, user_id):
             parse_mode='HTML'
         )
 
-        # خيط مراقبة ذكي يقرا أي نص تفاعلي يصدره السكربت
         def monitor_output():
             accumulated_buffer = ""
             while child.isalive():
                 try:
-                    # قراءة أي كتل نصية متاحة في البفر مباشرة بدون التوقف عند \n
-                    chunk = child.read_nonblocking(size=2048, timeout=0.2)
+                    chunk = child.read_nonblocking(size=1024, timeout=0.2)
                     if not chunk:
                         continue
                     
                     accumulated_buffer += chunk
                     text_lower = accumulated_buffer.lower()
 
-                    # 1. فحص طلب رقم الهاتف (بمختلف الصيغ العربية والإنجليزية)
-                    if any(term in text_lower for term in ['phone', 'number', 'mobile', 'enter phone', 'ارسل الرقم', 'الرقم', 'رقم الهاتف']) and user_interactive_sessions.get(chat_id, {}).get('state') == 'running':
-                        user_interactive_sessions[chat_id]['state'] = 'waiting_phone'
-                        accumulated_buffer = ""
-                        bot.send_message(
-                            chat_id, 
-                            f"{ce('bell')} <b>الملف يطلب رقم الهاتف!</b>\nيرجى إرسال رقم الهاتف مع رمز الدولة الآن (مثال: <code>+9647700000000</code>):", 
-                            parse_mode='HTML'
-                        )
-
-                    # 2. فحص طلب كود التحقق OTP
-                    elif any(term in text_lower for term in ['code', 'otp', 'enter code', 'passcode', 'الكود', 'كود', 'رمز التحقق']) and user_interactive_sessions.get(chat_id, {}).get('state') == 'running':
-                        user_interactive_sessions[chat_id]['state'] = 'waiting_code'
-                        accumulated_buffer = ""
-                        bot.send_message(
-                            chat_id, 
-                            f"{ce('sparkles')} <b>الملف يطلب كود التحقق (OTP)!</b>\nيرجى كتابة الكود الواصل لك واقتراحه هنا مباشرة:", 
-                            parse_mode='HTML'
-                        )
-
-                    # 3. فحص طلب كلمة سر التحقق بخطوتين 2FA
-                    elif any(term in text_lower for term in ['password', '2fa', 'two-step', 'السر', 'كلمة السر', 'الباسورد']) and user_interactive_sessions.get(chat_id, {}).get('state') == 'running':
-                        user_interactive_sessions[chat_id]['state'] = 'waiting_password'
-                        accumulated_buffer = ""
-                        bot.send_message(
-                            chat_id, 
-                            f"{ce('crown')} <b>الملف يطلب كلمة سر التحقق بخطوتين (2FA):</b>", 
-                            parse_mode='HTML'
-                        )
-
-                    # 4. التقاط أي خيار إدخال عام غير معرف مسبقاً (General Prompt)
-                    elif any(char in chunk for char in ['?', ':', '>']) and user_interactive_sessions.get(chat_id, {}).get('state') == 'running':
-                        clean_prompt = accumulated_buffer.strip()
-                        if len(clean_prompt) > 0 and len(clean_prompt) < 300:
-                            user_interactive_sessions[chat_id]['state'] = 'waiting_general'
+                    # التحقق مما إذا كانت العملية المحددة هي المنتظرة للإدخال
+                    if active_processes.get(proc_id, {}).get('state') == 'running':
+                        
+                        # 1. طلب رقم الهاتف
+                        if any(term in text_lower for term in ['phone', 'number', 'mobile', 'enter phone', 'ارسل الرقم', 'الرقم', 'رقم الهاتف']):
+                            active_processes[proc_id]['state'] = 'waiting_input'
+                            active_user_inputs[chat_id] = proc_id
                             accumulated_buffer = ""
                             bot.send_message(
                                 chat_id, 
-                                f"{ce('pencil')} <b>السكربت يحتاج إلى مدخلات:</b>\n\n<code>{escape_html(clean_prompt)}</code>\n\nيرجى كتابة الرد المطلوب الآن:", 
+                                f"{ce('bell')} <b>الملف (<code>{escape_html(script_name)}</code>) يطلب رقم الهاتف!</b>\nأرسل رقم الهاتف مع رمز الدولة (مثال: <code>+9647700000000</code>):", 
                                 parse_mode='HTML'
                             )
+
+                        # 2. طلب كود التحقق OTP
+                        elif any(term in text_lower for term in ['code', 'otp', 'enter code', 'passcode', 'الكود', 'كود', 'رمز التحقق']):
+                            active_processes[proc_id]['state'] = 'waiting_input'
+                            active_user_inputs[chat_id] = proc_id
+                            accumulated_buffer = ""
+                            bot.send_message(
+                                chat_id, 
+                                f"{ce('sparkles')} <b>الملف (<code>{escape_html(script_name)}</code>) يطلب كود التحقق (OTP)!</b>\nأرسل الكود الواصل لك هنا مباشرة:", 
+                                parse_mode='HTML'
+                            )
+
+                        # 3. طلب كلمة السر 2FA
+                        elif any(term in text_lower for term in ['password', '2fa', 'two-step', 'السر', 'كلمة السر', 'الباسورد']):
+                            active_processes[proc_id]['state'] = 'waiting_input'
+                            active_user_inputs[chat_id] = proc_id
+                            accumulated_buffer = ""
+                            bot.send_message(
+                                chat_id, 
+                                f"{ce('crown')} <b>الملف (<code>{escape_html(script_name)}</code>) يطلب كلمة سر التحقق بخطوتين (2FA):</b>", 
+                                parse_mode='HTML'
+                            )
+
+                        # 4. طباعة أي خطأ صريح وحجمه بدلاً من التعليق
+                        elif "traceback" in text_lower:
+                            bot.send_message(
+                                chat_id, 
+                                f"{ce('warning')} <b>حدث خطأ أثناء تشغيل (<code>{escape_html(script_name)}</code>):</b>\n<pre>{escape_html(accumulated_buffer[:400])}</pre>", 
+                                parse_mode='HTML'
+                            )
+                            break
 
                 except pexpect.TIMEOUT:
                     continue
@@ -307,40 +282,41 @@ def start_script_process(script_path, chat_id, user_id):
         threading.Thread(target=monitor_output, daemon=True).start()
 
     except Exception as e:
-        logging.error(f"Failed to start interactive script {script_name}: {e}")
+        logging.error(f"Failed to start script {script_name}: {e}")
         bot.send_message(chat_id, f"{ce('cross')} فشل في تشغيل الملف: {escape_html(str(e))}", parse_mode='HTML')
 
-# استقبال ردود المستخدم عند انتظار مدخلات تفاعلية
-@bot.message_handler(func=lambda message: message.chat.id in user_interactive_sessions and user_interactive_sessions[message.chat.id]['state'] != 'running')
+# استقبال مدخلات المستخدم وتوجيهها للعملية الصحيحة
+@bot.message_handler(func=lambda message: message.chat.id in active_user_inputs)
 def handle_interactive_inputs(message):
     chat_id = message.chat.id
-    session = user_interactive_sessions.get(chat_id)
+    proc_id = active_user_inputs.get(chat_id)
     
-    if session and session['process'].isalive():
+    proc_info = active_processes.get(proc_id)
+    if proc_info and proc_info['process'].isalive():
         user_input = message.text.strip()
         try:
-            session['process'].sendline(user_input)
-            session['state'] = 'running'
-            bot.send_message(chat_id, f"{ce('check')} <b>تم إرسال البيانات للسكربت بنجاح، جارِ المتابعة...</b>", parse_mode='HTML')
+            proc_info['process'].sendline(user_input)
+            proc_info['state'] = 'running'
+            del active_user_inputs[chat_id]
+            bot.send_message(chat_id, f"{ce('check')} <b>تم إرسال البيانات للسكربت بنجاح، جارِ الاستمرار...</b>", parse_mode='HTML')
         except Exception as e:
-            bot.send_message(chat_id, f"{ce('cross')} تعذر تمرير البيانات للسكربت: {escape_html(str(e))}", parse_mode='HTML')
+            bot.send_message(chat_id, f"{ce('cross')} تعذر إرسال البيانات للسكربت: {escape_html(str(e))}", parse_mode='HTML')
+    else:
+        if chat_id in active_user_inputs:
+            del active_user_inputs[chat_id]
 
 def stop_script_process(proc_id):
     if proc_id in active_processes:
         proc_info = active_processes[proc_id]
         proc = proc_info['process']
         try:
-            if proc_info['type'] == 'pexpect':
-                proc.close(force=True)
-            else:
-                proc.terminate()
-                proc.wait(timeout=3)
+            proc.close(force=True)
         except Exception as e:
             logging.warning(f"Process termination note: {e}")
         
         chat_id = proc_info['chat_id']
-        if chat_id in user_interactive_sessions:
-            del user_interactive_sessions[chat_id]
+        if active_user_inputs.get(chat_id) == proc_id:
+            del active_user_inputs[chat_id]
 
         del active_processes[proc_id]
         return True
@@ -502,7 +478,10 @@ def handle_incoming_file(message):
         downloaded_file = bot.download_file(file_info.file_path)
 
         file_name = message.document.file_name
-        save_path = os.path.join(UPLOADED_FILES_DIR, f"{user_id}_{file_name}")
+        
+        # حفظ باسم منفصل وفريد بالوقت لضمان تشغيل ملفات متعددة دون تعارض
+        timestamp = int(time.time())
+        save_path = os.path.join(UPLOADED_FILES_DIR, f"{user_id}_{timestamp}_{file_name}")
 
         with open(save_path, 'wb') as new_file:
             new_file.write(downloaded_file)
