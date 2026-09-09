@@ -6,6 +6,7 @@ import shutil
 import sqlite3
 import logging
 import tempfile
+import threading
 import subprocess
 from datetime import datetime
 from collections import defaultdict
@@ -13,6 +14,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 import telebot
 from telebot import types
+
+# تثبيت/استدعاء مكتبة pexpect التفاعلية
+try:
+    import pexpect
+except ImportError:
+    subprocess.run([sys.executable, "-m", "pip", "install", "pexpect"])
+    import pexpect
 
 # ======= قاموس الإيموجيات المميزة (Custom Emoji IDs) ======= #
 E = {
@@ -183,60 +191,137 @@ def get_stats():
         pending_count = cursor.fetchone()[0]
         return approved_count, pending_count
 
-# ======= تتبع العمليات المعددة ======= #
-active_processes = {}  # الهيكل: {pid: {'process': proc, 'chat_id': chat_id, 'filename': filename}}
+# ======= تتبع العمليات الشغالة والمحادثات التفاعلية ======= #
+active_processes = {}  # {id_key: {'process': proc, 'chat_id': chat_id, 'filename': filename, 'type': 'sub'/'pexpect'}}
+user_interactive_sessions = {}  # {chat_id: {'process': pexpect_child, 'state': 'running'/'waiting_input'}}
 
 def start_script_process(script_path, chat_id, user_id):
     script_name = os.path.basename(script_path)
     
     # التحقق من وجود ملف شغال مسبقاً للمستخدمين العاديين فقط
     if not is_admin(user_id):
-        for pid, proc_info in list(active_processes.items()):
-            if proc_info['chat_id'] == chat_id and proc_info['process'].poll() is None:
-                bot.send_message(
-                    chat_id, 
-                    f"{ce('warning')} يوجد ملف قيد التشغيل بالفعل: <code>{escape_html(proc_info['filename'])}</code>\n\nيُسمح لك بتشغيل ملف واحد فقط بنفس الوقت.", 
-                    parse_mode='HTML'
-                )
-                return
+        for key, proc_info in list(active_processes.items()):
+            if proc_info['chat_id'] == chat_id:
+                # التأكد إذا كانت العملية ما تزال تعمل
+                proc = proc_info['process']
+                is_alive = proc.isalive() if proc_info['type'] == 'pexpect' else proc.poll() is None
+                if is_alive:
+                    bot.send_message(
+                        chat_id, 
+                        f"{ce('warning')} يوجد ملف قيد التشغيل بالفعل: <code>{escape_html(proc_info['filename'])}</code>\n\nيُسمح لك بتشغيل ملف واحد فقط بنفس الوقت.", 
+                        parse_mode='HTML'
+                    )
+                    return
 
     try:
-        proc = subprocess.Popen([sys.executable, script_path])
-        pid = proc.pid
-        active_processes[pid] = {
-            'process': proc,
+        # تشغيل الملف بنظام أرمكس التفاعلي عبر pexpect
+        child = pexpect.spawn(f"{sys.executable} {script_path}", encoding='utf-8', timeout=None)
+        proc_id = id(child)
+        
+        active_processes[proc_id] = {
+            'process': child,
             'chat_id': chat_id,
-            'filename': script_name
+            'filename': script_name,
+            'type': 'pexpect'
         }
         
+        user_interactive_sessions[chat_id] = {
+            'process': child,
+            'filename': script_name,
+            'state': 'running',
+            'proc_id': proc_id
+        }
+
         markup = types.InlineKeyboardMarkup()
-        stop_button = create_emoji_btn(f"إيقاف {script_name}", callback_data=f'stop_process_{pid}', emoji_id=E['cross'], color="danger")
+        stop_button = create_emoji_btn(f"إيقاف {script_name}", callback_data=f'stop_process_{proc_id}', emoji_id=E['cross'], color="danger")
         markup.add(stop_button)
 
         bot.send_message(
             chat_id, 
-            f"{ce('check')} <b>تم تشغيل الملف بنجاح:</b> <code>{escape_html(script_name)}</code>", 
+            f"{ce('check')} <b>تم تشغيل الملف بنجاح:</b> <code>{escape_html(script_name)}</code>\n\n⚡️ جارِ مراقبة المدخلات والارتباط بالحساب تلقائياً...", 
             reply_markup=markup, 
             parse_mode='HTML'
         )
+
+        # خيط لمراقبة الطلبات التفاعلية (أرقام / أكواد)
+        def monitor_output():
+            while child.isalive():
+                try:
+                    line = child.readline()
+                    if not line:
+                        continue
+                    
+                    line_clean = line.strip().lower()
+
+                    # اكتشاف طلب رقم الهاتف
+                    if any(term in line_clean for term in ['phone', 'number', 'enter phone', 'ارسل الرقم', 'الرقم']):
+                        user_interactive_sessions[chat_id]['state'] = 'waiting_phone'
+                        bot.send_message(
+                            chat_id, 
+                            f"{ce('bell')} <b>الملف يطلب رقم الهاتف!</b>\nيرجى إرسال رقم الهاتف مع رمز الدولة الآن (مثال: <code>+9647700000000</code>):", 
+                            parse_mode='HTML'
+                        )
+
+                    # اكتشاف طلب كود التحقق OTP
+                    elif any(term in line_clean for term in ['code', 'otp', 'enter code', 'الكود', 'كود']):
+                        user_interactive_sessions[chat_id]['state'] = 'waiting_code'
+                        bot.send_message(
+                            chat_id, 
+                            f"{ce('sparkles')} <b>الملف يطلب كود التحقق (OTP)!</b>\nيرجى كتابة الكود الواصل لك واقتراحه هنا مباشرة:", 
+                            parse_mode='HTML'
+                        )
+
+                    # اكتشاف طلب كلمة سر التحقق بخطوتين 2FA
+                    elif any(term in line_clean for term in ['password', '2fa', 'السر', 'كلمة السر']):
+                        user_interactive_sessions[chat_id]['state'] = 'waiting_password'
+                        bot.send_message(
+                            chat_id, 
+                            f"{ce('crown')} <b>الملف يطلب كلمة سر التحقق بخطوتين (2FA):</b>", 
+                            parse_mode='HTML'
+                        )
+
+                except Exception:
+                    break
+
+        threading.Thread(target=monitor_output, daemon=True).start()
+
     except Exception as e:
-        logging.error(f"Failed to start script {script_name}: {e}")
+        logging.error(f"Failed to start interactive script {script_name}: {e}")
         bot.send_message(chat_id, f"{ce('cross')} فشل في تشغيل الملف: {escape_html(str(e))}", parse_mode='HTML')
 
-def stop_script_process(pid):
-    if pid in active_processes:
-        proc_info = active_processes[pid]
+# استقبال ردود المستخدم عند انتظار مدخلات تفاعلية
+@bot.message_handler(func=lambda message: message.chat.id in user_interactive_sessions and user_interactive_sessions[message.chat.id]['state'] != 'running')
+def handle_interactive_inputs(message):
+    chat_id = message.chat.id
+    session = user_interactive_sessions.get(chat_id)
+    
+    if session and session['process'].isalive():
+        user_input = message.text.strip()
+        try:
+            session['process'].sendline(user_input)
+            session['state'] = 'running'
+            bot.send_message(chat_id, f"{ce('check')} <b>تم إرسال البيانات للسكربت بنجاح، جارِ المتابعة...</b>", parse_mode='HTML')
+        except Exception as e:
+            bot.send_message(chat_id, f"{ce('cross')} تعذر تمرير البيانات للسكربت: {escape_html(str(e))}", parse_mode='HTML')
+
+def stop_script_process(proc_id):
+    if proc_id in active_processes:
+        proc_info = active_processes[proc_id]
         proc = proc_info['process']
         try:
-            proc.terminate()
-            proc.wait(timeout=3)
-        except Exception:
-            try:
-                proc.kill()
-            except Exception as e:
-                logging.warning(f"Process termination note: {e}")
+            if proc_info['type'] == 'pexpect':
+                proc.close(force=True)
+            else:
+                proc.terminate()
+                proc.wait(timeout=3)
+        except Exception as e:
+            logging.warning(f"Process termination note: {e}")
         
-        del active_processes[pid]
+        chat_id = proc_info['chat_id']
+        if chat_id in user_interactive_sessions:
+            del user_interactive_sessions[chat_id]
+
+        del active_processes[proc_id]
         return True
     return False
 
@@ -416,8 +501,8 @@ def handle_incoming_file(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('stop_process_'))
 def handle_stop_process(call):
-    pid = int(call.data.split('_')[2])
-    if stop_script_process(pid):
+    proc_id = int(call.data.split('_')[2])
+    if stop_script_process(proc_id):
         bot.answer_callback_query(call.id, "تم إيقاف الملف بنجاح.")
         bot.edit_message_text(f"{ce('cross')} <b>تم إيقاف تشغيل الملف المحدد.</b>", call.message.chat.id, call.message.message_id, parse_mode='HTML')
     else:
