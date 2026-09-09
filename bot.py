@@ -183,32 +183,49 @@ def get_stats():
         pending_count = cursor.fetchone()[0]
         return approved_count, pending_count
 
-# ======= تتبع العمليات ======= #
-active_processes = {}
+# ======= تتبع العمليات المعددة ======= #
+active_processes = {}  # الهيكل: {pid: {'process': proc, 'chat_id': chat_id, 'filename': filename}}
 
-def start_script_process(script_path, chat_id):
+def start_script_process(script_path, chat_id, user_id):
     script_name = os.path.basename(script_path)
     
-    if chat_id in active_processes and active_processes[chat_id]['process'].poll() is None:
-        bot.send_message(chat_id, f"{ce('warning')} يوجد ملف قيد التشغيل بالفعل: <code>{escape_html(script_name)}</code>", parse_mode='HTML')
-        return
+    # التحقق من وجود ملف شغال مسبقاً للمستخدمين العاديين فقط
+    if not is_admin(user_id):
+        for pid, proc_info in list(active_processes.items()):
+            if proc_info['chat_id'] == chat_id and proc_info['process'].poll() is None:
+                bot.send_message(
+                    chat_id, 
+                    f"{ce('warning')} يوجد ملف قيد التشغيل بالفعل: <code>{escape_html(proc_info['filename'])}</code>\n\nيُسمح لك بتشغيل ملف واحد فقط بنفس الوقت.", 
+                    parse_mode='HTML'
+                )
+                return
 
     try:
         proc = subprocess.Popen([sys.executable, script_path])
-        active_processes[chat_id] = {'process': proc, 'filename': script_name}
+        pid = proc.pid
+        active_processes[pid] = {
+            'process': proc,
+            'chat_id': chat_id,
+            'filename': script_name
+        }
         
         markup = types.InlineKeyboardMarkup()
-        stop_button = create_emoji_btn(f"إيقاف {script_name}", callback_data=f'stop_process_{chat_id}', emoji_id=E['cross'], color="danger")
+        stop_button = create_emoji_btn(f"إيقاف {script_name}", callback_data=f'stop_process_{pid}', emoji_id=E['cross'], color="danger")
         markup.add(stop_button)
 
-        bot.send_message(chat_id, f"{ce('check')} <b>تم تشغيل الملف بنجاح:</b> <code>{escape_html(script_name)}</code>", reply_markup=markup, parse_mode='HTML')
+        bot.send_message(
+            chat_id, 
+            f"{ce('check')} <b>تم تشغيل الملف بنجاح:</b> <code>{escape_html(script_name)}</code>", 
+            reply_markup=markup, 
+            parse_mode='HTML'
+        )
     except Exception as e:
         logging.error(f"Failed to start script {script_name}: {e}")
         bot.send_message(chat_id, f"{ce('cross')} فشل في تشغيل الملف: {escape_html(str(e))}", parse_mode='HTML')
 
-def stop_script_process(chat_id):
-    if chat_id in active_processes:
-        proc_info = active_processes[chat_id]
+def stop_script_process(pid):
+    if pid in active_processes:
+        proc_info = active_processes[pid]
         proc = proc_info['process']
         try:
             proc.terminate()
@@ -219,7 +236,7 @@ def stop_script_process(chat_id):
             except Exception as e:
                 logging.warning(f"Process termination note: {e}")
         
-        del active_processes[chat_id]
+        del active_processes[pid]
         return True
     return False
 
@@ -391,7 +408,7 @@ def handle_incoming_file(message):
                 bot.reply_to(message, f"{ce('warning')} <b>تم رفض الملف لاحتوائه على كود خطير:</b>\n<code>{escape_html(reason)}</code>", parse_mode='HTML')
                 return
 
-        start_script_process(save_path, message.chat.id)
+        start_script_process(save_path, message.chat.id, user_id)
 
     except Exception as e:
         logging.error(f"Error handling file upload: {e}")
@@ -399,12 +416,12 @@ def handle_incoming_file(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('stop_process_'))
 def handle_stop_process(call):
-    chat_id = int(call.data.split('_')[2])
-    if stop_script_process(chat_id):
+    pid = int(call.data.split('_')[2])
+    if stop_script_process(pid):
         bot.answer_callback_query(call.id, "تم إيقاف الملف بنجاح.")
-        bot.edit_message_text(f"{ce('cross')} <b>تم إيقاف تشغيل الملف.</b>", call.message.chat.id, call.message.message_id, parse_mode='HTML')
+        bot.edit_message_text(f"{ce('cross')} <b>تم إيقاف تشغيل الملف المحدد.</b>", call.message.chat.id, call.message.message_id, parse_mode='HTML')
     else:
-        bot.answer_callback_query(call.id, "لا يوجد ملف قيد التشغيل حالياً.")
+        bot.answer_callback_query(call.id, "هذا الملف متوقف بالفعل أو غير موجود.")
 
 # ======= التحكم بالحماية والخيارات ======= #
 @bot.callback_query_handler(func=lambda call: call.data == 'protection_control')
