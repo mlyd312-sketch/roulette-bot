@@ -263,7 +263,7 @@ def start_script_process(script_path, chat_id, user_id):
                                 parse_mode='HTML'
                             )
 
-                        # 4. طباعة أي خطأ صريح وحجمه بدلاً من التعليق
+                        # 4. طباعة أي خطأ صريح
                         elif "traceback" in text_lower:
                             bot.send_message(
                                 chat_id, 
@@ -670,24 +670,29 @@ def manage_users_view(call):
         parse_mode='HTML'
     )
 
+# ======= تثبيت المكتبات وتحديث الـ Regex ======= #
 @bot.callback_query_handler(func=lambda call: call.data == 'download_lib')
 def prompt_install_lib(call):
-    bot.send_message(call.message.chat.id, f"{ce('pencil')} <b>أرسل اسم المكتبة المراد تثبيتها (مثال: requests):</b>", parse_mode='HTML')
+    bot.send_message(call.message.chat.id, f"{ce('pencil')} <b>أرسل اسم المكتبة أو الخيارات المراد تثبيتها (مثال: <code>telethon==1.36.0</code> أو <code>telethon --upgrade</code>):</b>", parse_mode='HTML')
     bot.register_next_step_handler(call.message, process_install_lib)
 
 def process_install_lib(message):
     lib_name = message.text.strip()
-    if not re.match(r'^[a-zA-Z0-9_\-]+$', lib_name):
-        bot.send_message(message.chat.id, f"{ce('cross')} اسم المكتبة غير صالح.", parse_mode='HTML')
+    
+    # التعديل الأهم: تسمح هذه الـ Regex بكتابة الإشارات الرمزية وإصدارات المكتبات والخيارات (--upgrade، ==، <=، إلخ)
+    if not re.match(r'^[a-zA-Z0-9_\-\.=<>\s]+$', lib_name):
+        bot.send_message(message.chat.id, f"{ce('cross')} اسم المكتبة أو الأمر غير صالح.", parse_mode='HTML')
         return
 
-    bot.send_message(message.chat.id, f"{ce('fire')} جاري تثبيت المكتبة <code>{escape_html(lib_name)}</code>...", parse_mode='HTML')
+    bot.send_message(message.chat.id, f"{ce('fire')} جاري تثبيت/تحديث المكتبة <code>{escape_html(lib_name)}</code>...", parse_mode='HTML')
     
     def install():
         try:
-            result = subprocess.run([sys.executable, "-m", "pip", "install", lib_name], capture_output=True, text=True, timeout=60)
+            # تقسيم المدخلات لتمرير الخيارات مباشرة إلى أمر pip
+            args = [sys.executable, "-m", "pip", "install"] + lib_name.split()
+            result = subprocess.run(args, capture_output=True, text=True, timeout=120)
             if result.returncode == 0:
-                bot.send_message(message.chat.id, f"{ce('check')} تم تثبيت المكتبة <code>{escape_html(lib_name)}</code> بنجاح!", parse_mode='HTML')
+                bot.send_message(message.chat.id, f"{ce('check')} تم تنفيذ الأمر والتثبيت بنجاح!\n<pre>{escape_html(result.stdout[-300:])}</pre>", parse_mode='HTML')
             else:
                 bot.send_message(message.chat.id, f"{ce('cross')} فشل تثبيت المكتبة:\n<pre>{escape_html(result.stderr[:500])}</pre>", parse_mode='HTML')
         except Exception as e:
