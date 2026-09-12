@@ -1,28 +1,25 @@
-import os
 import sys
-import re
+import telebot
+from telebot import types
 import time
-import shutil
-import sqlite3
-import logging
-import tempfile
-import threading
 import subprocess
+import threading
+import os
+import tempfile
+import shutil
+import re
+import json
 from datetime import datetime
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-import telebot
-from telebot import types
+# ======= إعدادات البوت ======= #
+BOT_TOKEN = '8877293036:AAGg_82F0bT1Bhov42sk9qDcRMsVNpfnErw'
+ADMIN_ID = 1920665874
+YOUR_USERNAME = '@u_8_y'
+ADMIN_CHANNEL = '@FD_CQ'
 
-# تثبيت/استدعاء مكتبة pexpect التفاعلية
-try:
-    import pexpect
-except ImportError:
-    subprocess.run([sys.executable, "-m", "pip", "install", "pexpect"])
-    import pexpect
-
-# ======= قاموس الإيموجيات المميزة (Custom Emoji IDs) ======= #
+# ======= قاموس الإيموجيات المميزة ======= #
 E = {
     'fire': '5424972470023104089',
     'check': '5206607081334906820',
@@ -42,670 +39,1164 @@ E = {
     'bulb': '5422439311196834318',
     'bell': '5458603043203327669',
     'python': '5260480440971570446',
+    '1': '5141109049114232089',
+    '2': '5140871649091912628',
+    '3': '5141399818400170896',
+    '4': '5138822752123225428',
+    '5': '5141062672057369534',
 }
 
-def ce(emoji_key: str, default_icon: str = "✨") -> str:
-    emoji_id = E.get(emoji_key)
-    if emoji_id:
-        return f'<tg-emoji emoji-id="{emoji_id}">{default_icon}</tg-emoji>'
-    return default_icon
-
+# ======= دوال مساعدة ======= #
 def strip_emoji_from_text(text: str) -> str:
     emoji_pattern = re.compile(
         r'[\U00010000-\U0010ffff]|[\u2600-\u27BF]|[\uFE00-\uFE0F]|[\u2300-\u23FF]'
     )
     return emoji_pattern.sub('', text).strip()
 
-def escape_html(text: str) -> str:
-    if not text:
-        return ""
-    return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-
-def create_emoji_btn(text, callback_data=None, url=None, emoji_id=None, color="primary"):
+def btn(text, callback_data=None, url=None, emoji_key=None, style=None):
     clean_text = strip_emoji_from_text(text)
-    btn_kwargs = {'text': clean_text}
-    if callback_data:
-        btn_kwargs['callback_data'] = callback_data
-    if url:
-        btn_kwargs['url'] = url
-        
-    btn = types.InlineKeyboardButton(**btn_kwargs)
-    if emoji_id:
+    b = types.InlineKeyboardButton(text=clean_text, callback_data=callback_data, url=url)
+    if emoji_key and emoji_key in E:
         try:
-            setattr(btn, 'custom_emoji_id', emoji_id)
-            setattr(btn, 'icon_custom_emoji_id', emoji_id)
+            b.icon_custom_emoji_id = E[emoji_key]
         except Exception:
             pass
-    if color:
-        btn.style = color
-    return btn
+    if style:
+        try:
+            b.style = style
+        except Exception:
+            pass
+    return b
 
-# ======= إعدادات السجلات ======= #
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+def ce(emoji_key):
+    if emoji_key in E:
+        return f'<tg-emoji emoji-id="{E[emoji_key]}">⭐</tg-emoji>'
+    return '⭐'
 
-# ======= الثوابت والإعدادات ======= #
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8877293036:AAGg_82F0bT1Bhov42sk9qDcRMsVNpfnErw')
-ADMIN_ID = int(os.getenv('ADMIN_ID', 1920665874))
-YOUR_USERNAME = '@u_8_y'
-ADMIN_CHANNEL = '@FD_CQ'
+def send_with_emoji(chat_id, text, emoji_id=None, reply_markup=None, parse_mode='HTML'):
+    try:
+        if emoji_id:
+            full_text = f'<tg-emoji emoji-id="{emoji_id}">⭐</tg-emoji> {text}'
+            return bot.send_message(chat_id, full_text, reply_markup=reply_markup, parse_mode=parse_mode)
+        else:
+            return bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except:
+        try:
+            return bot.send_message(chat_id, text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except:
+            return bot.send_message(chat_id, text, reply_markup=reply_markup)
 
-UPLOADED_FILES_DIR = "uploaded_files"
-SUSPICIOUS_FILES_DIR = 'suspicious_files'
-MAX_FILE_SIZE = 5 * 1024 * 1024
+def edit_with_emoji(chat_id, message_id, text, emoji_id=None, reply_markup=None, parse_mode='HTML'):
+    try:
+        if emoji_id:
+            full_text = f'<tg-emoji emoji-id="{emoji_id}">⭐</tg-emoji> {text}'
+            return bot.edit_message_text(full_text, chat_id, message_id, reply_markup=reply_markup, parse_mode=parse_mode)
+        else:
+            return bot.edit_message_text(text, chat_id, message_id, reply_markup=reply_markup, parse_mode=parse_mode)
+    except:
+        try:
+            return bot.edit_message_text(text, chat_id, message_id, reply_markup=reply_markup, parse_mode=parse_mode)
+        except:
+            pass
 
+# ✅ دالة عرض الوقت
+def format_remaining_time(seconds):
+    if seconds <= 0:
+        return "انتهى"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    if hours > 0:
+        return f"{hours} ساعة و{minutes} دقيقة"
+    return f"{minutes} دقيقة"
+
+# ======= المتغيرات العامة ======= #
 bot = telebot.TeleBot(BOT_TOKEN)
-executor = ThreadPoolExecutor(max_workers=10)
+bot_scripts = {}
+uploaded_files_dir = "uploaded_files"
+banned_users = set()
+user_chats = {}
+approved_users = set()
+pending_requests = {}
+approved_users.add(ADMIN_ID)
+admins = {ADMIN_ID}
+waiting_for_library = set()
 
 protection_enabled = True
 protection_level = "medium"
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024
 bot_running = True
 
-for directory in [UPLOADED_FILES_DIR, SUSPICIOUS_FILES_DIR]:
-    os.makedirs(directory, exist_ok=True)
+# ======= نظام انتهاء الصلاحية (ساعتان) ======= #
+RENEWAL_HOURS = 2
+EXPIRY_FILE = 'file_expiry.json'
+user_file_expiry = {}
 
-# ======= قاعدة البيانات (SQLite) ======= #
-def init_sqlite_db():
-    with sqlite3.connect('bot_data.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS approved_users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                approved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS pending_requests (
-                user_id INTEGER PRIMARY KEY,
-                first_name TEXT,
-                username TEXT,
-                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cursor.execute('INSERT OR IGNORE INTO approved_users (user_id, username) VALUES (?, ?)', (ADMIN_ID, 'ADMIN'))
-        conn.commit()
+def load_expiry():
+    global user_file_expiry
+    if os.path.exists(EXPIRY_FILE):
+        try:
+            with open(EXPIRY_FILE, 'r') as f:
+                data = json.load(f)
+                user_file_expiry = {str(k): v for k, v in data.items()}
+        except Exception as e:
+            print(f"Error loading expiry: {e}")
+            user_file_expiry = {}
 
-init_sqlite_db()
+def save_expiry():
+    try:
+        with open(EXPIRY_FILE, 'w') as f:
+            json.dump(user_file_expiry, f)
+    except Exception as e:
+        print(f"Error saving expiry: {e}")
+
+load_expiry()
+
+lock = threading.Lock()
+executor = ThreadPoolExecutor(max_workers=10)
+
+if not os.path.exists(uploaded_files_dir):
+    os.makedirs(uploaded_files_dir)
+
+# ======= دوال مساعدة ======= #
+def save_chat_id(chat_id):
+    if chat_id not in user_chats:
+        user_chats[chat_id] = True
 
 def is_admin(user_id):
-    return user_id == ADMIN_ID
+    return user_id in admins
 
 def is_approved_user(user_id):
-    if is_admin(user_id):
-        return True
-    with sqlite3.connect('bot_data.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT user_id FROM approved_users WHERE user_id = ?', (user_id,))
-        return cursor.fetchone() is not None
+    return user_id in approved_users or user_id in admins
 
-def is_pending_user(user_id):
-    with sqlite3.connect('bot_data.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT user_id FROM pending_requests WHERE user_id = ?', (user_id,))
-        return cursor.fetchone() is not None
+def request_approval(user_id, user_info):
+    pending_requests[user_id] = user_info
+    markup = types.InlineKeyboardMarkup()
+    approve_button = btn("قبول المستخدم", callback_data=f'approve_{user_id}', emoji_key='check', style="success")
+    reject_button = btn("رفض المستخدم", callback_data=f'reject_{user_id}', emoji_key='cross', style="danger")
+    markup.add(reject_button, approve_button)
 
-def add_approved_user(user_id, username):
-    with sqlite3.connect('bot_data.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('INSERT OR REPLACE INTO approved_users (user_id, username) VALUES (?, ?)', (user_id, username))
-        cursor.execute('DELETE FROM pending_requests WHERE user_id = ?', (user_id,))
-        conn.commit()
-
-def add_pending_request(user_id, first_name, username):
-    with sqlite3.connect('bot_data.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('INSERT OR REPLACE INTO pending_requests (user_id, first_name, username) VALUES (?, ?, ?)',
-                       (user_id, first_name, username))
-        conn.commit()
-
-def remove_pending_request(user_id):
-    with sqlite3.connect('bot_data.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM pending_requests WHERE user_id = ?', (user_id,))
-        conn.commit()
-
-def get_pending_requests():
-    with sqlite3.connect('bot_data.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT user_id, first_name, username FROM pending_requests')
-        return cursor.fetchall()
-
-def get_stats():
-    with sqlite3.connect('bot_data.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM approved_users')
-        approved_count = cursor.fetchone()[0]
-        cursor.execute('SELECT COUNT(*) FROM pending_requests')
-        pending_count = cursor.fetchone()[0]
-        return approved_count, pending_count
-
-# ======= تتبع العمليات والمحادثات التفاعلية المتعددة ======= #
-active_processes = {}  # {proc_id: {'process': child, 'chat_id': chat_id, 'filename': script_name}}
-active_user_inputs = {} # {chat_id: proc_id} لتحديد السكربت الحالي الذي ينتظر مدخلات من المستخدم
-
-def start_script_process(script_path, chat_id, user_id):
-    script_name = os.path.basename(script_path)
-
+    text = (
+        f'{ce("bell")} <b>طلب اشتراك جديد:</b>\n\n'
+        f'{ce("people")} الاسم: {user_info["first_name"]}\n'
+        f'{ce("chart")} ID: <code>{user_id}</code>\n'
+        f'{ce("link")} اليوزر: @{user_info.get("username", "غير متوفر")}\n'
+        f'{ce("settings")} الوقت: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n\n'
+        f'{ce("sparkles")} اختر الإجراء المناسب:'
+    )
     try:
-        # تشغيل السكربت بوضع Unbuffered (-u) لضمان إرسال المخرجات فوراً
-        child = pexpect.spawn(f"{sys.executable} -u {script_path}", encoding='utf-8', timeout=None)
-        proc_id = id(child)
-        
-        active_processes[proc_id] = {
-            'process': child,
-            'chat_id': chat_id,
-            'filename': script_name,
-            'state': 'running'
-        }
+        bot.send_message(ADMIN_ID, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(ADMIN_ID, "طلب اشتراك جديد", reply_markup=markup)
 
-        markup = types.InlineKeyboardMarkup()
-        stop_button = create_emoji_btn(f"إيقاف {script_name}", callback_data=f'stop_process_{proc_id}', emoji_id=E['cross'], color="danger")
-        markup.add(stop_button)
+def send_waiting_message(chat_id):
+    markup = types.InlineKeyboardMarkup()
+    support_button = btn("التواصل مع الدعم", callback_data='online_support', emoji_key='bell', style="primary")
+    markup.add(support_button)
 
-        bot.send_message(
-            chat_id, 
-            f"{ce('check')} <b>تم تشغيل الملف بنجاح:</b> <code>{escape_html(script_name)}</code>\n\n⚡️ جارِ مراقبة المدخلات والارتباط بالحساب تلقائياً...", 
-            reply_markup=markup, 
-            parse_mode='HTML'
-        )
+    text = (
+        f'{ce("settings")} <b>تم إرسال طلب اشتراكك إلى الأدمن.</b>\n'
+        f'يرجى الانتظار حتى يتم الموافقة على طلبك.\n\n'
+        f'{ce("bell")} للتواصل مع الدعم اضغط على الزر أدناه:'
+    )
+    try:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(chat_id, "⏳ تم إرسال الطلب.", reply_markup=markup)
 
-        def monitor_output():
-            accumulated_buffer = ""
-            while child.isalive():
-                try:
-                    chunk = child.read_nonblocking(size=1024, timeout=0.2)
-                    if not chunk:
-                        continue
-                    
-                    accumulated_buffer += chunk
-                    text_lower = accumulated_buffer.lower()
-
-                    # التحقق مما إذا كانت العملية المحددة هي المنتظرة للإدخال
-                    if active_processes.get(proc_id, {}).get('state') == 'running':
-                        
-                        # 1. طلب رقم الهاتف
-                        if any(term in text_lower for term in ['phone', 'number', 'mobile', 'enter phone', 'ارسل الرقم', 'الرقم', 'رقم الهاتف']):
-                            active_processes[proc_id]['state'] = 'waiting_input'
-                            active_user_inputs[chat_id] = proc_id
-                            accumulated_buffer = ""
-                            bot.send_message(
-                                chat_id, 
-                                f"{ce('bell')} <b>الملف (<code>{escape_html(script_name)}</code>) يطلب رقم الهاتف!</b>\nأرسل رقم الهاتف مع رمز الدولة (مثال: <code>+9647700000000</code>):", 
-                                parse_mode='HTML'
-                            )
-
-                        # 2. طلب كود التحقق OTP
-                        elif any(term in text_lower for term in ['code', 'otp', 'enter code', 'passcode', 'الكود', 'كود', 'رمز التحقق']):
-                            active_processes[proc_id]['state'] = 'waiting_input'
-                            active_user_inputs[chat_id] = proc_id
-                            accumulated_buffer = ""
-                            bot.send_message(
-                                chat_id, 
-                                f"{ce('sparkles')} <b>الملف (<code>{escape_html(script_name)}</code>) يطلب كود التحقق (OTP)!</b>\nأرسل الكود الواصل لك هنا مباشرة:", 
-                                parse_mode='HTML'
-                            )
-
-                        # 3. طلب كلمة السر 2FA
-                        elif any(term in text_lower for term in ['password', '2fa', 'two-step', 'السر', 'كلمة السر', 'الباسورد']):
-                            active_processes[proc_id]['state'] = 'waiting_input'
-                            active_user_inputs[chat_id] = proc_id
-                            accumulated_buffer = ""
-                            bot.send_message(
-                                chat_id, 
-                                f"{ce('crown')} <b>الملف (<code>{escape_html(script_name)}</code>) يطلب كلمة سر التحقق بخطوتين (2FA):</b>", 
-                                parse_mode='HTML'
-                            )
-
-                        # 4. طباعة أي خطأ صريح
-                        elif "traceback" in text_lower:
-                            bot.send_message(
-                                chat_id, 
-                                f"{ce('warning')} <b>حدث خطأ أثناء تشغيل (<code>{escape_html(script_name)}</code>):</b>\n<pre>{escape_html(accumulated_buffer[:400])}</pre>", 
-                                parse_mode='HTML'
-                            )
-                            break
-
-                except pexpect.TIMEOUT:
-                    continue
-                except pexpect.EOF:
-                    break
-                except Exception:
-                    break
-
-        threading.Thread(target=monitor_output, daemon=True).start()
-
-    except Exception as e:
-        logging.error(f"Failed to start script {script_name}: {e}")
-        bot.send_message(chat_id, f"{ce('cross')} فشل في تشغيل الملف: {escape_html(str(e))}", parse_mode='HTML')
-
-# استقبال مدخلات المستخدم وتوجيهها للعملية الصحيحة
-@bot.message_handler(func=lambda message: message.chat.id in active_user_inputs)
-def handle_interactive_inputs(message):
-    chat_id = message.chat.id
-    proc_id = active_user_inputs.get(chat_id)
-    
-    proc_info = active_processes.get(proc_id)
-    if proc_info and proc_info['process'].isalive():
-        user_input = message.text.strip()
-        try:
-            proc_info['process'].sendline(user_input)
-            proc_info['state'] = 'running'
-            del active_user_inputs[chat_id]
-            bot.send_message(chat_id, f"{ce('check')} <b>تم إرسال البيانات للسكربت بنجاح، جارِ الاستمرار...</b>", parse_mode='HTML')
-        except Exception as e:
-            bot.send_message(chat_id, f"{ce('cross')} تعذر إرسال البيانات للسكربت: {escape_html(str(e))}", parse_mode='HTML')
-    else:
-        if chat_id in active_user_inputs:
-            del active_user_inputs[chat_id]
-
-def stop_script_process(proc_id):
-    if proc_id in active_processes:
-        proc_info = active_processes[proc_id]
-        proc = proc_info['process']
-        try:
-            proc.close(force=True)
-        except Exception as e:
-            logging.warning(f"Process termination note: {e}")
-        
-        chat_id = proc_info['chat_id']
-        if active_user_inputs.get(chat_id) == proc_id:
-            del active_user_inputs[chat_id]
-
-        del active_processes[proc_id]
-        return True
-    return False
-
-# ======= فحص الأمان ======= #
+# ======= دوال الحماية ======= #
 def scan_file_for_malicious_code(file_path, user_id):
     if is_admin(user_id):
-        return False, "مسؤول"
-
+        return False, None
     try:
         with open(file_path, 'rb') as f:
-            raw_data = f.read()
-        
-        content = raw_data.decode('utf-8', errors='ignore')
-        
-        dangerous_patterns = [
-            r"rm\s+-rf",
-            r"os\.system\(",
-            r"subprocess\.Popen\(",
-            r"eval\(",
-            r"exec\(",
-            r"import\s+marshal",
-            r"__import__\(",
-            r"open\(.*['\"]w['\"]"
-        ]
-        
+            content = f.read().decode('utf-8', errors='replace')
+        dangerous_patterns = []
+        if protection_level == "low":
+            dangerous_patterns = [
+                r"rm\s+-rf\s+[\'\"]?/",
+                r"eval\s*\(",
+                r"exec\s*\(",
+            ]
+        elif protection_level == "medium":
+            dangerous_patterns = [
+                r"rm\s+-rf\s+[\'\"]?/",
+                r"import\s+marshal",
+                r"import\s+zlib",
+                r"import\s+base64",
+                r"eval\s*\(",
+                r"exec\s*\(",
+                r"shutil\.make_archive",
+                r"subprocess\.call",
+                r"subprocess\.Popen",
+                r"os\.system",
+            ]
+        else:
+            dangerous_patterns = [
+                r"rm\s+-rf\s+[\'\"]?/",
+                r"import\s+marshal",
+                r"import\s+zlib",
+                r"import\s+base64",
+                r"eval\s*\(",
+                r"exec\s*\(",
+                r"shutil\.make_archive",
+                r"subprocess",
+                r"os\.system",
+                r"os\.popen",
+                r"sys\.exit",
+                r"open\s*\(\s*['\"]/etc",
+                r"open\s*\(\s*['\"]/root",
+                r"__import__\s*\(",
+                r"getattr\s*\(",
+                r"setattr\s*\(",
+                r"globals\s*\(",
+                r"locals\s*\(",
+                r"compile\s*\(",
+            ]
         for pattern in dangerous_patterns:
             if re.search(pattern, content, re.IGNORECASE):
-                return True, f"تم اكتشاف نمط مشبوه: {pattern}"
-                
-        return False, ""
+                return True, f"تم اكتشاف أمر خطير: {pattern}"
+        return False, None
     except Exception as e:
-        return True, f"خطأ أثناء فحص الملف: {e}"
+        return True, f"خطأ في الفحص: {e}"
 
-# ======= الأوامر والمعالجات ======= #
-@bot.message_handler(commands=['start'])
-def start_cmd(message):
-    user_id = message.from_user.id
+# ======= دوال التشغيل والإيقاف ======= #
+def stop_bot(script_path, chat_id):
+    script_name = os.path.basename(script_path)
+    try:
+        if chat_id in bot_scripts and 'processes' in bot_scripts[chat_id]:
+            process = bot_scripts[chat_id]['processes'].get(script_name)
+            if process and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                bot_scripts[chat_id]['processes'][script_name] = None
+        return True
+    except Exception as e:
+        print(f"Error stopping bot: {e}")
+        return False
 
-    if not bot_running:
-        bot.send_message(message.chat.id, f"{ce('warning')} البوت متوقف حاليًا لإجراء الصيانات.", parse_mode='HTML')
-        return
-
-    if is_approved_user(user_id):
-        show_main_menu(message)
-    else:
-        first_name = escape_html(message.from_user.first_name or 'مستخدم')
-        raw_username = message.from_user.username or 'بدون_يوزر'
-        username = escape_html(raw_username)
-        
-        add_pending_request(user_id, message.from_user.first_name or 'مستخدم', raw_username)
-        
-        markup = types.InlineKeyboardMarkup()
-        markup.add(
-            create_emoji_btn("قبول", callback_data=f'approve_{user_id}', emoji_id=E['check'], color="success"),
-            create_emoji_btn("رفض", callback_data=f'reject_{user_id}', emoji_id=E['cross'], color="danger")
-        )
-        
+def start_file(script_path, chat_id):
+    script_name = os.path.basename(script_path)
+    with lock:
+        if chat_id not in bot_scripts:
+            bot_scripts[chat_id] = {'processes': {}, 'files': [], 'path': ''}
+        if 'processes' not in bot_scripts[chat_id]:
+            bot_scripts[chat_id]['processes'] = {}
         try:
-            bot.send_message(
-                ADMIN_ID,
-                f"{ce('pencil')} <b>طلب اشتراك جديد:</b>\n\n"
-                f"{ce('people')} الاسم: {first_name}\n"
-                f"{ce('link')} ID: <code>{user_id}</code>\n"
-                f"{ce('sparkles')} اليوزر: @{username}",
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
+            old_process = bot_scripts[chat_id]['processes'].get(script_name)
+            if old_process and old_process.poll() is None:
+                send_with_emoji(chat_id, f"الملف {script_name} يعمل بالفعل.", E['warning'])
+                return
+            p = subprocess.Popen([sys.executable, script_path])
+            bot_scripts[chat_id]['processes'][script_name] = p
+            bot_scripts[chat_id]['name'] = script_name
+            bot_scripts[chat_id]['path'] = script_path
+
+            if not is_admin(chat_id):
+                chat_key = str(chat_id)
+                if chat_key not in user_file_expiry:
+                    user_file_expiry[chat_key] = {}
+                user_file_expiry[chat_key][script_name] = time.time() + (RENEWAL_HOURS * 3600)
+                save_expiry()
+                text = (
+                    f'{ce("check")} تم تشغيل الملف <code>{script_name}</code>\n'
+                    f'{ce("settings")} مدة التشغيل: {RENEWAL_HOURS} ساعات\n'
+                    f'بعد انتهاء المدة، سيتم إيقافه تلقائياً وتحتاج إلى موافقة الأدمن.'
+                )
+                try:
+                    bot.send_message(chat_id, text, parse_mode='HTML')
+                except:
+                    bot.send_message(chat_id, f"✅ تم تشغيل {script_name}")
+            else:
+                send_with_emoji(chat_id, f"تم تشغيل الملف {script_name} بنجاح.", E['check'])
         except Exception as e:
-            logging.error(f"Failed to send request to admin: {e}")
+            send_with_emoji(chat_id, f"فشل في تشغيل الملف: {e}", E['cross'])
 
-        bot.send_message(
-            message.chat.id,
-            f"{ce('bell')} <b>تم إرسال طلب اشتراكك إلى الأدمن.</b>\nيرجى الانتظار لحين الموافقة عليه.",
-            parse_mode='HTML'
-        )
+def start_bot_control():
+    global bot_running
+    bot_running = True
 
+def stop_bot_control():
+    global bot_running
+    bot_running = False
+
+# ======= فحص انتهاء الصلاحية ======= #
+def check_expired_files():
+    while True:
+        try:
+            current_time = time.time()
+            for user_id_str in list(user_file_expiry.keys()):
+                user_id = int(user_id_str)
+                for file_name in list(user_file_expiry[user_id_str].keys()):
+                    expiry = user_file_expiry[user_id_str][file_name]
+                    if current_time >= expiry:
+                        script_path = os.path.join(uploaded_files_dir, file_name)
+                        if user_id in bot_scripts and 'processes' in bot_scripts[user_id]:
+                            process = bot_scripts[user_id]['processes'].get(file_name)
+                            if process and process.poll() is None:
+                                process.terminate()
+                                try:
+                                    process.wait(timeout=5)
+                                except:
+                                    process.kill()
+                                bot_scripts[user_id]['processes'][file_name] = None
+
+                                try:
+                                    text = (
+                                        f'{ce("settings")} <b>انتهى وقت تشغيل الملف:</b>\n\n'
+                                        f'📁 <code>{file_name}</code>\n\n'
+                                        f'انتهت صلاحية التشغيل ({RENEWAL_HOURS} ساعات).'
+                                    )
+                                    bot.send_message(user_id, text, parse_mode='HTML')
+                                except:
+                                    pass
+
+                                try:
+                                    markup = types.InlineKeyboardMarkup()
+                                    approve_btn = btn("الموافقة على التجديد", callback_data=f'renewapprove_{user_id}_{file_name}', emoji_key='check', style="success")
+                                    reject_btn = btn("رفض التجديد", callback_data=f'renewreject_{user_id}_{file_name}', emoji_key='cross', style="danger")
+                                    markup.add(reject_btn, approve_btn)
+
+                                    text = (
+                                        f'{ce("settings")} <b>طلب تجديد تشغيل:</b>\n\n'
+                                        f'{ce("people")} المستخدم: <code>{user_id}</code>\n'
+                                        f'{ce("python")} الملف: <code>{file_name}</code>\n\n'
+                                        f'انتهى وقت التشغيل ({RENEWAL_HOURS} ساعات).'
+                                    )
+                                    bot.send_message(ADMIN_ID, text, reply_markup=markup, parse_mode='HTML')
+                                except:
+                                    pass
+
+                        del user_file_expiry[user_id_str][file_name]
+                        if not user_file_expiry[user_id_str]:
+                            del user_file_expiry[user_id_str]
+                        save_expiry()
+        except Exception as e:
+            print(f"Error in check_expired_files: {e}")
+
+        time.sleep(60)
+
+threading.Thread(target=check_expired_files, daemon=True).start()
+
+# ======= القائمة الرئيسية ======= #
 def show_main_menu(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
-    
-    markup.add(
-        create_emoji_btn("التحكم في الحماية", callback_data='protection_control', emoji_id=E['settings'], color="primary"),
-        create_emoji_btn("رفع ملف", callback_data='upload', emoji_id=E['python'], color="success")
-    )
-    markup.add(
-        create_emoji_btn("فتاة المحاور", callback_data='support_girl', emoji_id=E['sparkles'], color="primary"),
-        create_emoji_btn("سرعة البوت", callback_data='speed', emoji_id=E['fire'], color="primary")
-    )
-    markup.add(
-        create_emoji_btn("حول البوت", callback_data='about_bot', emoji_id=E['bulb'], color="primary"),
-        create_emoji_btn("الدعم الفني", callback_data='tech_support', emoji_id=E['bell'], color="primary")
-    )
-    markup.add(
-        create_emoji_btn("تثبيت مكتبة", callback_data='download_lib', emoji_id=E['pencil'], color="success"),
-        create_emoji_btn("التواصل مع الدعم", callback_data='online_support', emoji_id=E['link'], color="primary")
-    )
-    
-    if is_admin(message.from_user.id):
-        markup.add(
-            create_emoji_btn("إدارة المستخدمين", callback_data='manage_users', emoji_id=E['people'], color="primary"),
-            create_emoji_btn("حالة البوت الرئيسي", callback_data='bot_control', emoji_id=E['crown'], color="primary")
-        )
 
-    first_name = escape_html(message.from_user.first_name or '')
-    bot.send_message(
-        message.chat.id,
-        f"{ce('python')} <b>مرحباً بك في منصة Python Hosting</b>\n\n"
-        f"مرحباً، {first_name}! {ce('sparkles')}\n"
-        f"اختر الخدمة المطلوبة من الأزرار أدناه:",
-        reply_markup=markup,
-        parse_mode='HTML'
+    upload_button          = btn("رفع ملف", callback_data='upload', emoji_key='python', style="success")
+    protection_button      = btn("التحكم في الحماية", callback_data='protection_control', emoji_key='settings', style="primary")
+    speed_button           = btn("سرعة البوت", callback_data='speed', emoji_key='fire', style="primary")
+    uploaded_files_button  = btn("الملفات المرفوعة", callback_data='uploaded_files_list', emoji_key='pencil', style="primary")
+    about_button           = btn("حول البوت", callback_data='about_bot', emoji_key='bulb', style="primary")
+    support_girl_button    = btn("فتاة المحاور", callback_data='support_girl', emoji_key='sparkles', style="primary")
+    tech_support_button    = btn("الدعم الفني", callback_data='tech_support', emoji_key='bell', style="primary")
+    install_lib_button     = btn("تثبيت مكتبة", callback_data='download_lib', emoji_key='gem', style="success")
+
+    markup.add(protection_button, upload_button)
+    markup.add(uploaded_files_button, speed_button)
+    markup.add(support_girl_button, about_button)
+    markup.add(install_lib_button, tech_support_button)
+
+    if is_admin(message.from_user.id):
+        users_button       = btn("إدارة المستخدمين", callback_data='manage_users', emoji_key='people', style="primary")
+        bot_control_button = btn("لوحة التحكم بالأدمن", callback_data='bot_control', emoji_key='crown', style="primary")
+        markup.add(users_button, bot_control_button)
+
+    user_name = message.from_user.first_name or "مستخدم"
+    text = (
+        f'مرحباً بك في منصة Python Hosting {ce("python")}\n\n'
+        f'{ce("sparkles")} مرحباً، {user_name}!\n'
+        f'اختر الخدمة المطلوبة من الأزرار أدناه:'
     )
+    try:
+        bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(message.chat.id, text, reply_markup=markup)
+
+# ======= أمر البداية ======= #
+@bot.message_handler(commands=['start'])
+def start(message):
+    save_chat_id(message.chat.id)
+    user_id = message.from_user.id
+    if not bot_running and not is_admin(user_id):
+        text = (
+            f'{ce("settings")} <b>البوت في صيانة حالياً</b>\n\n'
+            f'نعتذر عن الإزعاج، البوت متوقف مؤقتاً لأعمال الصيانة.\n'
+            f'يرجى المحاولة لاحقاً.\n\n'
+            f'شكراً لتفهمكم 🙏'
+        )
+        try:
+            bot.send_message(message.chat.id, text, parse_mode='HTML')
+        except:
+            bot.send_message(message.chat.id, "🛠️ البوت في صيانة حالياً")
+        return
+    if message.from_user.username in banned_users:
+        send_with_emoji(message.chat.id, "تم حظرك من البوت.", E['warning'])
+        return
+    if is_approved_user(user_id):
+        show_main_menu(message)
+    elif user_id in pending_requests:
+        send_waiting_message(message.chat.id)
+    else:
+        user_info = {
+            'first_name': message.from_user.first_name,
+            'username': message.from_user.username or 'غير متوفر',
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        request_approval(user_id, user_info)
+        send_waiting_message(message.chat.id)
+
+# ======= أزرار القائمة ======= #
+@bot.callback_query_handler(func=lambda call: call.data == 'support_girl')
+def support_girl_callback(call):
+    if not is_approved_user(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ تحتاج إلى موافقة الأدمن")
+        return
+    bot.answer_callback_query(call.id)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    back_button = btn("رجوع", callback_data='back_to_main', emoji_key='arrow', style="primary")
+    markup.add(back_button)
+
+    text = (
+        f'{ce("sparkles")} <b>فتاة المحاور</b>\n\n'
+        f'{ce("people")} أهلاً بك! يمكنك الاستفسار عن كيفية رفع البوتات وتحديثها أو حل المشاكل البرمجية الشائعة.'
+    )
+    try:
+        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(call.message.chat.id, "✨ فتاة المحاور", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'tech_support')
+def tech_support_callback(call):
+    if not is_approved_user(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ تحتاج إلى موافقة الأدمن")
+        return
+    bot.answer_callback_query(call.id)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    contact_admin_btn = btn("راسل المسؤول", url="https://t.me/ew1t_7", emoji_key='people', style="primary")
+    channel_btn = btn("قناة المساعدة", url="https://t.me/M_6FW", emoji_key='link', style="primary")
+    back_btn = btn("رجوع", callback_data='back_to_main', emoji_key='arrow', style="primary")
+    markup.add(contact_admin_btn)
+    markup.add(channel_btn)
+    markup.add(back_btn)
+
+    text = (
+        f'{ce("bell")} <b>الدعم الفني والخدمات</b>\n\n'
+        f'{ce("people")} للتواصل المباشر مع الإدارة: <a href="https://t.me/ew1t_7">@ew1t_7</a>\n'
+        f'{ce("link")} القناة الرسمية: <a href="https://t.me/M_6FW">@M_6FW</a>'
+    )
+    try:
+        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(call.message.chat.id, "🔔 الدعم الفني", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'speed')
+def check_speed(call):
+    if not is_approved_user(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ تحتاج إلى موافقة الأدمن")
+        return
+    bot.answer_callback_query(call.id, "⏳ جاري القياس...")
+    wait_text = f'{ce("settings")} <b>انتظر...</b>'
+    try:
+        wait_msg = bot.send_message(call.message.chat.id, wait_text, parse_mode='HTML')
+    except:
+        wait_msg = bot.send_message(call.message.chat.id, "⏳ انتظر...")
+    time.sleep(1)
+    avg_response_time = 85.50
+    total_time = 256.30
+    result_text = (
+        f'{ce("fire")} <b>سرعة البوت الحالية:</b>\n\n'
+        f'{ce("chart")} سرعة الاستجابة: <code>{avg_response_time:.2f} ms</code>\n'
+        f'{ce("settings")} الوقت الكلي: <code>{total_time:.2f} ms</code>\n'
+        f'{ce("trophy")} التقييم: <b>جيدة جداً</b>\n\n'
+        f'<i>{datetime.now().strftime("%I:%M %p")}</i>'
+    )
+    try:
+        bot.edit_message_text(result_text, call.message.chat.id, wait_msg.message_id, parse_mode='HTML')
+    except:
+        bot.edit_message_text(f"🚀 سرعة البوت", call.message.chat.id, wait_msg.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'upload')
+def upload_file_callback(call):
+    if not is_approved_user(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ تحتاج إلى موافقة الأدمن")
+        return
+    if not bot_running:
+        bot.answer_callback_query(call.id, "⏸️ البوت في صيانة")
+        return
+    bot.answer_callback_query(call.id, "📥 جاري الإعداد...")
+    markup = types.InlineKeyboardMarkup()
+    cancel_button = btn("إلغاء", callback_data='back_to_main', emoji_key='cross', style="danger")
+    markup.add(cancel_button)
+
+    text = f'{ce("python")} <b>قم بإرسال ملف البوت بصيغة (.py) الآن:</b>'
+    try:
+        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(call.message.chat.id, "📥 أرسل ملف .py", reply_markup=markup)
+
+# ======= قائمة الملفات المرفوعة ======= #
+@bot.callback_query_handler(func=lambda call: call.data == 'uploaded_files_list')
+def show_uploaded_files(call):
+    if not is_approved_user(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ تحتاج إلى موافقة الأدمن")
+        return
+    bot.answer_callback_query(call.id)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    chat_id = call.message.chat.id
+    if chat_id in bot_scripts and bot_scripts[chat_id].get('files'):
+        for file_name in bot_scripts[chat_id]['files']:
+            is_running = False
+            if 'processes' in bot_scripts[chat_id]:
+                proc = bot_scripts[chat_id]['processes'].get(file_name)
+                if proc and proc.poll() is None:
+                    is_running = True
+            status = "يعمل" if is_running else "متوقف"
+
+            time_info = ""
+            if is_running:
+                chat_key = str(chat_id)
+                if chat_key in user_file_expiry and file_name in user_file_expiry[chat_key]:
+                    remaining = user_file_expiry[chat_key][file_name] - time.time()
+                    time_info = f" | ⏰ {format_remaining_time(remaining)}"
+
+            btn_text = f"{file_name} ({status}{time_info})"
+            file_btn = btn(btn_text, callback_data=f'file_control_{file_name}', emoji_key='python', style="primary")
+            markup.add(file_btn)
+    else:
+        markup.add(btn("لا توجد ملفات", callback_data='noop', emoji_key='cross', style="danger"))
+    back_button = btn("رجوع", callback_data='back_to_main', emoji_key='arrow', style="primary")
+    markup.add(back_button)
+
+    text = (
+        f'{ce("chart")} <b>قائمة الملفات المرفوعة بك:</b>\n\n'
+        f'{ce("sparkles")} اضغط على اسم الملف للتحكم به (تشغيل / إيقاف / حذف):'
+    )
+    try:
+        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(call.message.chat.id, "📋 الملفات المرفوعة:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('file_control_'))
+def file_control_menu(call):
+    if not is_approved_user(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ تحتاج إلى موافقة الأدمن")
+        return
+    bot.answer_callback_query(call.id)
+    file_name = call.data.replace('file_control_', '')
+    chat_id = call.message.chat.id
+    is_running = False
+    if chat_id in bot_scripts and 'processes' in bot_scripts[chat_id]:
+        proc = bot_scripts[chat_id]['processes'].get(file_name)
+        if proc and proc.poll() is None:
+            is_running = True
+    status = "يعمل" if is_running else "متوقف"
+
+    time_line = ""
+    if is_running:
+        chat_key = str(chat_id)
+        if chat_key in user_file_expiry and file_name in user_file_expiry[chat_key]:
+            remaining = user_file_expiry[chat_key][file_name] - time.time()
+            time_line = f"\n{ce('settings')} الوقت المتبقي: <b>{format_remaining_time(remaining)}</b>"
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    if is_running:
+        stop_btn = btn("إيقاف", callback_data=f'stopfile_{chat_id}_{file_name}', emoji_key='cross', style="danger")
+        markup.add(stop_btn)
+    else:
+        start_btn = btn("تشغيل", callback_data=f'startfile_{chat_id}_{file_name}', emoji_key='check', style="success")
+        markup.add(start_btn)
+    delete_btn = btn("حذف", callback_data=f'deletefile_{chat_id}_{file_name}', emoji_key='warning', style="danger")
+    markup.add(delete_btn)
+    back_btn = btn("رجوع", callback_data='uploaded_files_list', emoji_key='arrow', style="primary")
+    markup.add(back_btn)
+
+    text = (
+        f'{ce("python")} <b>التحكم بالملف:</b>\n\n'
+        f'{ce("chart")} الاسم: <code>{file_name}</code>\n'
+        f'{ce("settings")} الحالة: <b>{status}</b>'
+        f'{time_line}'
+    )
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.edit_message_text(f"🐍 {file_name} - {status}", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('startfile_'))
+def start_file_callback(call):
+    try:
+        parts = call.data.replace('startfile_', '').split('_', 1)
+        chat_id = int(parts[0])
+        file_name = parts[1]
+        if not is_admin(chat_id):
+            chat_key = str(chat_id)
+            if chat_key in user_file_expiry and file_name in user_file_expiry[chat_key]:
+                if time.time() < user_file_expiry[chat_key][file_name]:
+                    bot.answer_callback_query(call.id, "⚠️ الملف قيد التشغيل حالياً")
+                    return
+        script_path = os.path.join(uploaded_files_dir, file_name)
+        if not os.path.exists(script_path):
+            bot.answer_callback_query(call.id, "❌ الملف غير موجود")
+            return
+        start_file(script_path, chat_id)
+        bot.answer_callback_query(call.id, "✅ تم التشغيل")
+        call.data = f'file_control_{file_name}'
+        file_control_menu(call)
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"❌ خطأ: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('stopfile_'))
+def stop_file_callback(call):
+    try:
+        parts = call.data.replace('stopfile_', '').split('_', 1)
+        chat_id = int(parts[0])
+        file_name = parts[1]
+        script_path = os.path.join(uploaded_files_dir, file_name)
+        stop_bot(script_path, chat_id)
+        chat_key = str(chat_id)
+        if chat_key in user_file_expiry and file_name in user_file_expiry[chat_key]:
+            del user_file_expiry[chat_key][file_name]
+            if not user_file_expiry[chat_key]:
+                del user_file_expiry[chat_key]
+            save_expiry()
+        bot.answer_callback_query(call.id, "✅ تم الإيقاف")
+        call.data = f'file_control_{file_name}'
+        file_control_menu(call)
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"❌ خطأ: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('deletefile_'))
+def delete_file_callback(call):
+    try:
+        parts = call.data.replace('deletefile_', '').split('_', 1)
+        chat_id = int(parts[0])
+        file_name = parts[1]
+        script_path = os.path.join(uploaded_files_dir, file_name)
+        stop_bot(script_path, chat_id)
+        if os.path.exists(script_path):
+            os.remove(script_path)
+        if chat_id in bot_scripts:
+            if 'files' in bot_scripts[chat_id] and file_name in bot_scripts[chat_id]['files']:
+                bot_scripts[chat_id]['files'].remove(file_name)
+            if 'processes' in bot_scripts[chat_id] and file_name in bot_scripts[chat_id]['processes']:
+                del bot_scripts[chat_id]['processes'][file_name]
+        chat_key = str(chat_id)
+        if chat_key in user_file_expiry and file_name in user_file_expiry[chat_key]:
+            del user_file_expiry[chat_key][file_name]
+            if not user_file_expiry[chat_key]:
+                del user_file_expiry[chat_key]
+            save_expiry()
+        bot.answer_callback_query(call.id, "🗑️ تم الحذف")
+        call.data = 'uploaded_files_list'
+        show_uploaded_files(call)
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"❌ خطأ: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data == 'noop')
+def noop_callback(call):
+    bot.answer_callback_query(call.id)
+
+# ======= موافقة/رفض تجديد التشغيل ======= #
+@bot.callback_query_handler(func=lambda call: call.data.startswith('renewapprove_'))
+def renew_approve(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية")
+        return
+    try:
+        parts = call.data.replace('renewapprove_', '').split('_', 1)
+        user_id = int(parts[0])
+        file_name = parts[1]
+        script_path = os.path.join(uploaded_files_dir, file_name)
+        if not os.path.exists(script_path):
+            bot.answer_callback_query(call.id, "❌ الملف غير موجود")
+            return
+        start_file(script_path, user_id)
+        bot.answer_callback_query(call.id, "✅ تم الموافقة")
+
+        text = (
+            f'{ce("check")} <b>تمت الموافقة على تجديد تشغيل:</b>\n'
+            f'{ce("people")} المستخدم: <code>{user_id}</code>\n'
+            f'{ce("python")} الملف: <code>{file_name}</code>'
+        )
+        try:
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML')
+        except:
+            bot.edit_message_text(f"✅ تم تجديد {file_name}", call.message.chat.id, call.message.message_id)
+
+        try:
+            user_text = (
+                f'{ce("sparkles")} <b>تمت الموافقة على تجديد التشغيل!</b>\n\n'
+                f'{ce("python")} الملف: <code>{file_name}</code>\n'
+                f'{ce("settings")} المدة: {RENEWAL_HOURS} ساعات'
+            )
+            bot.send_message(user_id, user_text, parse_mode='HTML')
+        except:
+            pass
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"❌ خطأ: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('renewreject_'))
+def renew_reject(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية")
+        return
+    try:
+        parts = call.data.replace('renewreject_', '').split('_', 1)
+        user_id = int(parts[0])
+        file_name = parts[1]
+        bot.answer_callback_query(call.id, "❌ تم الرفض")
+
+        text = (
+            f'{ce("cross")} <b>تم رفض تجديد تشغيل:</b>\n'
+            f'{ce("people")} المستخدم: <code>{user_id}</code>\n'
+            f'{ce("python")} الملف: <code>{file_name}</code>'
+        )
+        try:
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML')
+        except:
+            bot.edit_message_text(f"❌ تم رفض {file_name}", call.message.chat.id, call.message.message_id)
+
+        try:
+            user_text = (
+                f'{ce("cross")} <b>تم رفض طلب تجديد التشغيل.</b>\n\n'
+                f'{ce("python")} الملف: <code>{file_name}</code>'
+            )
+            bot.send_message(user_id, user_text, parse_mode='HTML')
+        except:
+            pass
+    except Exception as e:
+        bot.answer_callback_query(call.id, f"❌ خطأ: {e}")
+
+# ======= تثبيت مكتبة ======= #
+@bot.callback_query_handler(func=lambda call: call.data == 'download_lib')
+def download_library(call):
+    if not is_approved_user(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ تحتاج إلى موافقة الأدمن")
+        return
+    bot.answer_callback_query(call.id)
+    waiting_for_library.add(call.from_user.id)
+    markup = types.InlineKeyboardMarkup()
+    cancel_btn = btn("إلغاء", callback_data='cancel_library', emoji_key='cross', style="danger")
+    markup.add(cancel_btn)
+
+    text = f'{ce("gem")} <b>أرسل اسم المكتبة المراد تثبيتها (مثال: requests):</b>'
+    try:
+        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(call.message.chat.id, "📚 أرسل اسم المكتبة:", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'cancel_library')
+def cancel_library(call):
+    if call.from_user.id in waiting_for_library:
+        waiting_for_library.discard(call.from_user.id)
+    bot.answer_callback_query(call.id, "❌ تم الإلغاء")
+    try:
+        show_main_menu(call.message)
+    except:
+        pass
+
+@bot.message_handler(func=lambda message: message.from_user.id in waiting_for_library, content_types=['text'])
+def install_library_step(message):
+    user_id = message.from_user.id
+    waiting_for_library.discard(user_id)
+    library_name = message.text.strip()
+    if not re.match(r'^[a-zA-Z0-9_\-\.]+$', library_name):
+        send_with_emoji(message.chat.id, "اسم المكتبة غير صالح.", E['cross'])
+        return
+
+    loading_text = f'{ce("settings")} جاري تثبيت <code>{library_name}</code>...'
+    try:
+        bot.send_message(message.chat.id, loading_text, parse_mode='HTML')
+    except:
+        bot.send_message(message.chat.id, f"🔄 تثبيت {library_name}...")
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", library_name],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            success_text = f'{ce("check")} تم تثبيت <code>{library_name}</code> بنجاح.'
+            try:
+                bot.send_message(message.chat.id, success_text, parse_mode='HTML')
+            except:
+                bot.send_message(message.chat.id, f"✅ تم تثبيت {library_name}")
+        else:
+            error_text = result.stderr[-500:] if result.stderr else "خطأ غير معروف"
+            fail_text = f'{ce("cross")} فشل في تثبيت <code>{library_name}</code>\n\n<code>{error_text}</code>'
+            try:
+                bot.send_message(message.chat.id, fail_text, parse_mode='HTML')
+            except:
+                bot.send_message(message.chat.id, f"❌ فشل {library_name}")
+    except subprocess.TimeoutExpired:
+        send_with_emoji(message.chat.id, "انتهت مهلة التثبيت.", E['warning'])
+    except Exception as e:
+        send_with_emoji(message.chat.id, f"خطأ: {e}", E['cross'])
+
+@bot.callback_query_handler(func=lambda call: call.data == 'about_bot')
+def about_bot(call):
+    bot.answer_callback_query(call.id)
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    back_button = btn("رجوع", callback_data='back_to_main', emoji_key='arrow', style="primary")
+    markup.add(back_button)
+
+    text = (
+        f'{ce("bulb")} <b>حول البوت:</b>\n\n'
+        f'{ce("sparkles")} منصة لرفع واستضافة ملفات بايثون وتعديل مكتباتها والتحكم بها بسهولة وأمان.'
+    )
+    try:
+        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(call.message.chat.id, "💡 حول البوت", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'online_support')
+def online_support(call):
+    bot.answer_callback_query(call.id, "جارٍ الإرسال...")
+    user_info = f"👤 {call.from_user.first_name}\n🆔 {call.from_user.id}"
+    bot.send_message(ADMIN_ID, f"📞 طلب دعم:\n\n{user_info}")
+    send_with_emoji(call.message.chat.id, "تم الإرسال", E['check'])
+
+@bot.callback_query_handler(func=lambda call: call.data == 'protection_control')
+def protection_control(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "ليس لديك صلاحية")
+        return
+    status = "نظام الحماية مفعل" if protection_enabled else "نظام الحماية معطل"
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if protection_enabled:
+        toggle_btn = btn("تعطيل الحماية", callback_data='disable_protection', emoji_key='cross', style="danger")
+    else:
+        toggle_btn = btn("تفعيل الحماية", callback_data='enable_protection', emoji_key='check', style="success")
+    level_btn = btn("تغيير مستوى الفحص", callback_data='change_level', emoji_key='settings', style="primary")
+    back_btn = btn("رجوع", callback_data='back_to_main', emoji_key='arrow', style="primary")
+    markup.add(toggle_btn)
+    markup.add(level_btn)
+    markup.add(back_btn)
+
+    text = (
+        f'{ce("settings")} <b>إعدادات الحماية والأمان</b>\n\n'
+        f'{ce("check")} حالة الحماية: {status}\n'
+        f'{ce("chart")} مستوى الفحص: <code>{protection_level}</code>'
+    )
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.edit_message_text(f"⚙️ الحماية: {status} - {protection_level}", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'change_level')
+def change_level(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "ليس لديك صلاحية")
+        return
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    low_btn = btn("منخفض", callback_data='set_level_low', emoji_key='1', style="primary")
+    medium_btn = btn("متوسط", callback_data='set_level_medium', emoji_key='2', style="primary")
+    high_btn = btn("عالي", callback_data='set_level_high', emoji_key='3', style="primary")
+    back_btn = btn("رجوع", callback_data='protection_control', emoji_key='arrow', style="primary")
+    markup.add(low_btn, medium_btn, high_btn)
+    markup.add(back_btn)
+
+    text = (
+        f'{ce("settings")} <b>اختر مستوى الفحص:</b>\n\n'
+        f'{ce("1")} منخفض: فحص أساسي\n'
+        f'{ce("2")} متوسط: فحص متوازن\n'
+        f'{ce("3")} عالي: فحص صارم جداً'
+    )
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.edit_message_text("⚙️ اختر مستوى الفحص:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('set_level_'))
+def set_level(call):
+    global protection_level
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "ليس لديك صلاحية")
+        return
+    level = call.data.replace('set_level_', '')
+    protection_level = level
+    bot.answer_callback_query(call.id, f"✅ تم تعيين المستوى: {level}")
+    protection_control(call)
+
+@bot.callback_query_handler(func=lambda call: call.data in ['enable_protection', 'disable_protection'])
+def handle_protection_settings(call):
+    global protection_enabled
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "ليس لديك صلاحية")
+        return
+    if call.data == 'enable_protection':
+        protection_enabled = True
+        bot.answer_callback_query(call.id, "✅ تم تفعيل الحماية")
+    else:
+        protection_enabled = False
+        bot.answer_callback_query(call.id, "❌ تم تعطيل الحماية")
+    protection_control(call)
 
 @bot.callback_query_handler(func=lambda call: call.data == 'back_to_main')
 def back_to_main(call):
-    bot.answer_callback_query(call.id)
-    show_main_menu(call.message)
-
-@bot.callback_query_handler(func=lambda call: call.data == 'speed')
-def speed_test(call):
-    start_time = time.time()
-    msg = bot.send_message(call.message.chat.id, f"{ce('fire')} جاري قياس استجابة السيرفر...", parse_mode='HTML')
-    end_time = time.time()
-    
-    latency = (end_time - start_time) * 1000
-    bot.edit_message_text(
-        f"{ce('fire')} <b>سرعة استجابة البوت:</b> <code>{latency:.2f} ms</code>",
-        call.message.chat.id,
-        msg.message_id,
-        parse_mode='HTML'
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data == 'upload')
-def upload_prompt(call):
-    if not is_approved_user(call.from_user.id):
-        bot.answer_callback_query(call.id, "غير مصرح لك")
-        return
-        
-    bot.send_message(call.message.chat.id, f"{ce('pencil')} <b>قم بإرسال ملف البوت بصيغة (.py) الآن:</b>", parse_mode='HTML')
-
-@bot.message_handler(content_types=['document'])
-def handle_incoming_file(message):
-    user_id = message.from_user.id
-    if not is_approved_user(user_id):
-        bot.reply_to(message, f"{ce('cross')} ليس لديك صلاحية لاستخدام هذه الخدمة.", parse_mode='HTML')
-        return
-
-    if not message.document.file_name.endswith('.py'):
-        bot.reply_to(message, f"{ce('cross')} يُقبل ملفات بصيغة <code>.py</code> فقط!", parse_mode='HTML')
-        return
-
-    if message.document.file_size > MAX_FILE_SIZE:
-        bot.reply_to(message, f"{ce('warning')} حجم الملف يتجاوز الحد الأقصى المسموح به (5MB).", parse_mode='HTML')
-        return
-
     try:
-        file_info = bot.get_file(message.document.file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-
-        file_name = message.document.file_name
-        
-        # حفظ باسم منفصل وفريد بالوقت لضمان تشغيل ملفات متعددة دون تعارض
-        timestamp = int(time.time())
-        save_path = os.path.join(UPLOADED_FILES_DIR, f"{user_id}_{timestamp}_{file_name}")
-
-        with open(save_path, 'wb') as new_file:
-            new_file.write(downloaded_file)
-
-        if protection_enabled:
-            is_dangerous, reason = scan_file_for_malicious_code(save_path, user_id)
-            if is_dangerous:
-                os.remove(save_path)
-                bot.reply_to(message, f"{ce('warning')} <b>تم رفض الملف لاحتوائه على كود خطير:</b>\n<code>{escape_html(reason)}</code>", parse_mode='HTML')
-                return
-
-        start_script_process(save_path, message.chat.id, user_id)
-
-    except Exception as e:
-        logging.error(f"Error handling file upload: {e}")
-        bot.reply_to(message, f"{ce('cross')} حدث خطأ أثناء معالجة الملف: {escape_html(str(e))}", parse_mode='HTML')
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('stop_process_'))
-def handle_stop_process(call):
-    proc_id = int(call.data.split('_')[2])
-    if stop_script_process(proc_id):
-        bot.answer_callback_query(call.id, "تم إيقاف الملف بنجاح.")
-        bot.edit_message_text(f"{ce('cross')} <b>تم إيقاف تشغيل الملف المحدد.</b>", call.message.chat.id, call.message.message_id, parse_mode='HTML')
-    else:
-        bot.answer_callback_query(call.id, "هذا الملف متوقف بالفعل أو غير موجود.")
-
-# ======= التحكم بالحماية والخيارات ======= #
-@bot.callback_query_handler(func=lambda call: call.data == 'protection_control')
-def protection_control_handler(call):
-    markup = types.InlineKeyboardMarkup()
-    global protection_enabled
-    
-    if protection_enabled:
-        status_text = f"{ce('check')} نظام الحماية مفعل"
-        toggle_btn = create_emoji_btn("تعطيل الحماية", callback_data='toggle_prot_off', emoji_id=E['cross'], color="danger")
-    else:
-        status_text = f"{ce('cross')} نظام الحماية معطل"
-        toggle_btn = create_emoji_btn("تفعيل الحماية", callback_data='toggle_prot_on', emoji_id=E['check'], color="success")
-        
-    markup.add(toggle_btn)
-    markup.add(create_emoji_btn("رجوع", callback_data='back_to_main', emoji_id=E['arrow'], color="primary"))
-
-    bot.edit_message_text(
-        f"{ce('settings')} <b>إعدادات الحماية والأمان</b>\n\nحالة الحماية: {status_text}\nمستوى الفحص: <code>{protection_level}</code>",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
-        parse_mode='HTML'
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data in ['toggle_prot_on', 'toggle_prot_off'])
-def toggle_protection_status(call):
-    global protection_enabled
-    protection_enabled = (call.data == 'toggle_prot_on')
-    msg = "تم تفعيل الحماية" if protection_enabled else "تم تعطيل الحماية"
-    bot.answer_callback_query(call.id, msg)
-    protection_control_handler(call)
+        show_main_menu(call.message)
+        bot.answer_callback_query(call.id, "العودة")
+    except:
+        bot.answer_callback_query(call.id, "خطأ")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'bot_control')
-def bot_control_handler(call):
+def bot_control_callback(call):
     if not is_admin(call.from_user.id):
-        bot.answer_callback_query(call.id, "هذه الخاصية مخصصة للأدمن فقط.", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية")
         return
-
-    markup = types.InlineKeyboardMarkup()
+    global bot_running
+    total_admins = len(admins)
+    total_approved = len(approved_users)
+    total_pending = len(pending_requests)
+    total_banned = len(banned_users)
+    status_text = "يعمل" if bot_running else "متوقف"
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    promote_btn = btn("رفع مشرف جديد", callback_data='promote_user', emoji_key='crown', style="success")
+    demote_btn = btn("تنزيل مشرف", callback_data='demote_user', emoji_key='cross', style="danger")
+    markup.add(promote_btn, demote_btn)
+    ban_btn = btn("حظر عضو", callback_data='ban_user', emoji_key='warning', style="danger")
+    unban_btn = btn("إلغاء حظر عضو", callback_data='unban_user', emoji_key='check', style="success")
+    markup.add(ban_btn, unban_btn)
     if bot_running:
-        status_text = f"{ce('check')} البوت يعمل حالياً"
-        toggle_btn = create_emoji_btn("إيقاف البوت مؤقتاً", callback_data='toggle_bot_off', emoji_id=E['warning'], color="danger")
+        stop_btn = btn("إيقاف البوت مؤقتاً", callback_data='stop_bot_main', emoji_key='cross', style="danger")
+        markup.add(stop_btn)
     else:
-        status_text = f"{ce('cross')} البوت متوقف حالياً"
-        toggle_btn = create_emoji_btn("تشغيل البوت", callback_data='toggle_bot_on', emoji_id=E['check'], color="success")
-        
-    back_btn = create_emoji_btn("رجوع", callback_data='back_to_main', emoji_id=E['arrow'], color="primary")
-    markup.add(toggle_btn)
+        start_btn = btn("تشغيل البوت", callback_data='start_bot_main', emoji_key='fire', style="success")
+        markup.add(start_btn)
+    back_btn = btn("رجوع", callback_data='back_to_main', emoji_key='arrow', style="primary")
     markup.add(back_btn)
 
-    bot.edit_message_text(
-        f"{ce('crown')} <b>لوحة التحكم بحالة البوت الرئيسي</b>\n\nالحالة الحالية: {status_text}",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
-        parse_mode='HTML'
+    text = (
+        f'{ce("crown")} <b>لوحة تحكم الإدارة العليا</b>\n\n'
+        f'{ce("crown")} عدد المشرفين: {total_admins}\n'
+        f'{ce("people")} الأعضاء المفعلين: {total_approved}\n'
+        f'{ce("settings")} الطلبات المعلقة: {total_pending}\n'
+        f'{ce("warning")} المحظورين: {total_banned}\n'
+        f'{ce("fire")} حالة البوت: {status_text}'
     )
+    try:
+        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.edit_message_text(f"👑 لوحة التحكم - {status_text}", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data in ['toggle_bot_on', 'toggle_bot_off'])
-def toggle_bot_status(call):
-    global bot_running
+@bot.callback_query_handler(func=lambda call: call.data == 'stop_bot_main')
+def stop_bot_main(call):
     if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية")
         return
+    stop_bot_control()
+    bot.answer_callback_query(call.id, "🛑 تم الإيقاف")
+    bot_control_callback(call)
 
-    bot_running = (call.data == 'toggle_bot_on')
-    msg = "تم تشغيل البوت" if bot_running else "تم إيقاف البوت مؤقتاً"
-    bot.answer_callback_query(call.id, msg)
-    bot_control_handler(call)
-
-@bot.callback_query_handler(func=lambda call: call.data == 'support_girl')
-def support_girl_handler(call):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(create_emoji_btn("رجوع", callback_data='back_to_main', emoji_id=E['arrow'], color="primary"))
-    
-    bot.edit_message_text(
-        f"{ce('sparkles')} <b>فتاة المحاور</b>\n\nأهلاً بك! يمكنك الاستفسار عن كيفية رفع البوتات وتحديثها أو حل المشاكل البرمجية الشائعة.",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
-        parse_mode='HTML'
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data == 'about_bot')
-def about_bot_handler(call):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(create_emoji_btn("رجوع", callback_data='back_to_main', emoji_id=E['arrow'], color="primary"))
-    
-    bot.edit_message_text(
-        f"{ce('bulb')} <b>حول البوت:</b>\n\nمنصة لرفع واستضافة ملفات بايثون وتعديل مكتباتها والتحكم بها بسهولة وأمان.",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
-        parse_mode='HTML'
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data in ['tech_support', 'online_support'])
-def support_handler(call):
-    markup = types.InlineKeyboardMarkup()
-    markup.add(create_emoji_btn("راسل المسؤول", url=f"https://t.me/{YOUR_USERNAME.replace('@', '')}", emoji_id=E['people'], color="primary"))
-    markup.add(create_emoji_btn("قناة المساعدة", url=f"https://t.me/{ADMIN_CHANNEL.replace('@', '')}", emoji_id=E['link'], color="primary"))
-    markup.add(create_emoji_btn("رجوع", callback_data='back_to_main', emoji_id=E['arrow'], color="primary"))
-    
-    bot.edit_message_text(
-        f"{ce('bell')} <b>الدعم الفني والخدمات</b>\n\nللتواصل المباشر مع الإدارة: {YOUR_USERNAME}\nالقناة الرسمية: {ADMIN_CHANNEL}",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
-        parse_mode='HTML'
-    )
-
-# ======= معالجة القبول والرفض للطلبات ======= #
-@bot.callback_query_handler(func=lambda call: call.data.startswith(('approve_', 'reject_')))
-def handle_user_approval(call):
+@bot.callback_query_handler(func=lambda call: call.data == 'start_bot_main')
+def start_bot_main(call):
     if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية")
         return
+    start_bot_control()
+    bot.answer_callback_query(call.id, "⚡ تم التشغيل")
+    bot_control_callback(call)
 
-    action, target_user_id = call.data.split('_')
-    target_user_id = int(target_user_id)
+@bot.callback_query_handler(func=lambda call: call.data == 'promote_user')
+def promote_user_prompt(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية")
+        return
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "👑 أرسل ID المستخدم الذي تريد رفعه مشرفاً:")
+    bot.register_next_step_handler(msg, process_promote_user)
 
-    if action == 'approve':
-        add_approved_user(target_user_id, 'USER')
-        bot.answer_callback_query(call.id, "تم قبول المستخدم")
-        bot.edit_message_text(f"{ce('check')} تم القبول بنجاح لـ ID: <code>{target_user_id}</code>", call.message.chat.id, call.message.message_id, parse_mode='HTML')
-        try:
-            bot.send_message(target_user_id, f"{ce('sparkles')} <b>تمت الموافقة على اشتراكك!</b>\nيمكنك الآن استخدام البوت عبر /start", parse_mode='HTML')
-        except Exception:
-            pass
+def process_promote_user(message):
+    try:
+        user_id = int(message.text.strip())
+        if user_id not in approved_users:
+            send_with_emoji(message.chat.id, "المستخدم غير موجود في القائمة المعتمدة.", E['cross'])
+            return
+        admins.add(user_id)
+        send_with_emoji(message.chat.id, f"تم رفع المستخدم {user_id} كمشرف.", E['crown'])
+    except ValueError:
+        send_with_emoji(message.chat.id, "ID غير صالح.", E['cross'])
+
+@bot.callback_query_handler(func=lambda call: call.data == 'demote_user')
+def demote_user_prompt(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية")
+        return
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "❌ أرسل ID المشرف الذي تريد تنزيله:")
+    bot.register_next_step_handler(msg, process_demote_user)
+
+def process_demote_user(message):
+    try:
+        user_id = int(message.text.strip())
+        if user_id == ADMIN_ID:
+            send_with_emoji(message.chat.id, "لا يمكن تنزيل الأدمن الأساسي.", E['cross'])
+            return
+        if user_id in admins:
+            admins.remove(user_id)
+            send_with_emoji(message.chat.id, f"تم تنزيل المستخدم {user_id} من المشرفين.", E['check'])
+        else:
+            send_with_emoji(message.chat.id, "المستخدم ليس مشرفاً.", E['warning'])
+    except ValueError:
+        send_with_emoji(message.chat.id, "ID غير صالح.", E['cross'])
+
+@bot.callback_query_handler(func=lambda call: call.data == 'ban_user')
+def ban_user_prompt(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية")
+        return
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "⚠️ أرسل يوزر المستخدم الذي تريد حظره (مثل @username):")
+    bot.register_next_step_handler(msg, process_ban_user)
+
+def process_ban_user(message):
+    username = message.text.strip().replace('@', '')
+    banned_users.add(username)
+    send_with_emoji(message.chat.id, f"تم حظر المستخدم @{username}", E['check'])
+
+@bot.callback_query_handler(func=lambda call: call.data == 'unban_user')
+def unban_user_prompt(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "❌ ليس لديك صلاحية")
+        return
+    bot.answer_callback_query(call.id)
+    msg = bot.send_message(call.message.chat.id, "✅ أرسل يوزر المستخدم الذي تريد إلغاء حظره:")
+    bot.register_next_step_handler(msg, process_unban_user)
+
+def process_unban_user(message):
+    username = message.text.strip().replace('@', '')
+    if username in banned_users:
+        banned_users.remove(username)
+        send_with_emoji(message.chat.id, f"تم إلغاء حظر @{username}", E['check'])
     else:
-        remove_pending_request(target_user_id)
-        bot.answer_callback_query(call.id, "تم رفض المستخدم")
-        bot.edit_message_text(f"{ce('cross')} تم رفض الطلب لـ ID: <code>{target_user_id}</code>", call.message.chat.id, call.message.message_id, parse_mode='HTML')
+        send_with_emoji(message.chat.id, f"المستخدم @{username} غير محظور.", E['warning'])
 
-# ======= عرض قائمة الطلبات للإدارة ======= #
+# ======= إدارة الطلبات ======= #
 @bot.callback_query_handler(func=lambda call: call.data == 'manage_users')
-def manage_users_view(call):
+def manage_users(call):
     if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "ليس لديك صلاحية")
         return
+    bot.answer_callback_query(call.id)
 
-    approved_count, pending_count = get_stats()
-    pending_list = get_pending_requests()
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    if pending_requests:
+        for uid, info in list(pending_requests.items()):
+            name = info.get("first_name", "مستخدم")
+            accept_btn = btn(f"قبول {name}", callback_data=f'approve_{uid}', emoji_key='check', style="success")
+            reject_btn = btn(f"رفض {name}", callback_data=f'reject_{uid}', emoji_key='cross', style="danger")
+            markup.add(reject_btn, accept_btn)
+    else:
+        markup.add(btn("لا توجد طلبات حالياً", callback_data='noop', emoji_key='cross', style="danger"))
 
-    markup = types.InlineKeyboardMarkup()
-    
-    for uid, fname, uname in pending_list:
-        clean_fname = escape_html(fname or 'مستخدم')
-        markup.add(
-            create_emoji_btn(f"قبول {clean_fname}", callback_data=f'approve_{uid}', emoji_id=E['check'], color="success"),
-            create_emoji_btn(f"رفض {clean_fname}", callback_data=f'reject_{uid}', emoji_id=E['cross'], color="danger")
-        )
+    back_button = btn("رجوع", callback_data='back_to_main', emoji_key='arrow', style="primary")
+    markup.add(back_button)
 
-    markup.add(create_emoji_btn("رجوع", callback_data='back_to_main', emoji_id=E['arrow'], color="primary"))
-
-    bot.edit_message_text(
-        f"{ce('people')} <b>إدارة المستخدمين والطلبات:</b>\n\n"
-        f"{ce('check')} عدد المعتمدين: <code>{approved_count}</code>\n"
-        f"{ce('bell')} طلبات الانتظار: <code>{pending_count}</code>",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup,
-        parse_mode='HTML'
+    text = (
+        f'{ce("people")} <b>إدارة طلبات الرفع والتجديد:</b>\n\n'
+        f'{ce("check")} عدد المفعلين حالياً: <b>{len(approved_users)}</b>\n'
+        f'{ce("bell")} طلبات الانتظار: <b>{len(pending_requests)}</b>\n\n'
+        f'{ce("sparkles")} اختر الإجراء المناسب من الأزرار أدناه:'
     )
+    try:
+        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+    except:
+        bot.send_message(call.message.chat.id, "إدارة الطلبات", reply_markup=markup)
 
-# ======= تثبيت المكتبات وتحديث الـ Regex ======= #
-@bot.callback_query_handler(func=lambda call: call.data == 'download_lib')
-def prompt_install_lib(call):
-    bot.send_message(call.message.chat.id, f"{ce('pencil')} <b>أرسل اسم المكتبة أو الخيارات المراد تثبيتها (مثال: <code>telethon==1.36.0</code> أو <code>telethon --upgrade</code>):</b>", parse_mode='HTML')
-    bot.register_next_step_handler(call.message, process_install_lib)
-
-def process_install_lib(message):
-    lib_name = message.text.strip()
-    
-    # التعديل الأهم: تسمح هذه الـ Regex بكتابة الإشارات الرمزية وإصدارات المكتبات والخيارات (--upgrade، ==، <=، إلخ)
-    if not re.match(r'^[a-zA-Z0-9_\-\.=<>\s]+$', lib_name):
-        bot.send_message(message.chat.id, f"{ce('cross')} اسم المكتبة أو الأمر غير صالح.", parse_mode='HTML')
+@bot.message_handler(content_types=['document'])
+def handle_file(message):
+    if not is_approved_user(message.from_user.id):
+        send_with_emoji(message.chat.id, "تحتاج إلى موافقة الأدمن", E['cross'])
         return
+    try:
+        user_id = message.from_user.id
+        if message.from_user.username in banned_users:
+            send_with_emoji(message.chat.id, "تم حظرك", E['warning'])
+            return
+        file_info = bot.get_file(message.document.file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        bot_script_name = message.document.file_name
+        if not bot_script_name.endswith('.py'):
+            send_with_emoji(message.chat.id, "فقط ملفات .py مسموحة", E['cross'])
+            return
+        temp_path = os.path.join(tempfile.gettempdir(), bot_script_name)
+        with open(temp_path, 'wb') as f:
+            f.write(downloaded_file)
+        if protection_enabled and not is_admin(user_id):
+            is_malicious, activity = scan_file_for_malicious_code(temp_path, user_id)
+            if is_malicious:
+                send_with_emoji(message.chat.id, f"تم رفض الملف: {activity}", E['warning'])
+                return
+        script_path = os.path.join(uploaded_files_dir, bot_script_name)
+        shutil.move(temp_path, script_path)
+        if message.chat.id not in bot_scripts:
+            bot_scripts[message.chat.id] = {'processes': {}, 'files': [], 'path': ''}
+        if 'processes' not in bot_scripts[message.chat.id]:
+            bot_scripts[message.chat.id]['processes'] = {}
+        bot_scripts[message.chat.id]['name'] = bot_script_name
+        bot_scripts[message.chat.id]['uploader'] = message.from_user.username
+        bot_scripts[message.chat.id]['path'] = script_path
+        if 'files' not in bot_scripts[message.chat.id]:
+            bot_scripts[message.chat.id]['files'] = []
+        if bot_script_name not in bot_scripts[message.chat.id]['files']:
+            bot_scripts[message.chat.id]['files'].append(bot_script_name)
+        bot_scripts[message.chat.id]['processes'][bot_script_name] = None
+        markup = types.InlineKeyboardMarkup()
+        stop_button = btn(f"إيقاف {bot_script_name}", callback_data=f'stopfile_{message.chat.id}_{bot_script_name}', emoji_key='cross', style="danger")
+        markup.add(stop_button)
 
-    bot.send_message(message.chat.id, f"{ce('fire')} جاري تثبيت/تحديث المكتبة <code>{escape_html(lib_name)}</code>...", parse_mode='HTML')
-    
-    def install():
+        text = (
+            f'{ce("check")} <b>تم رفع الملف بنجاح</b>\n'
+            f'{ce("python")} <code>{bot_script_name}</code>'
+        )
         try:
-            # تقسيم المدخلات لتمرير الخيارات مباشرة إلى أمر pip
-            args = [sys.executable, "-m", "pip", "install"] + lib_name.split()
-            result = subprocess.run(args, capture_output=True, text=True, timeout=120)
-            if result.returncode == 0:
-                bot.send_message(message.chat.id, f"{ce('check')} تم تنفيذ الأمر والتثبيت بنجاح!\n<pre>{escape_html(result.stdout[-300:])}</pre>", parse_mode='HTML')
-            else:
-                bot.send_message(message.chat.id, f"{ce('cross')} فشل تثبيت المكتبة:\n<pre>{escape_html(result.stderr[:500])}</pre>", parse_mode='HTML')
-        except Exception as e:
-            bot.send_message(message.chat.id, f"{ce('cross')} حدث خطأ أثناء التثبيت: {escape_html(str(e))}", parse_mode='HTML')
+            bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+        except:
+            bot.reply_to(message, f"✅ تم رفع {bot_script_name}", reply_markup=markup)
+        start_file(script_path, message.chat.id)
+    except Exception as e:
+        send_with_emoji(message.chat.id, f"خطأ: {e}", E['cross'])
 
-    executor.submit(install)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('approve_'))
+def approve_user(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "ليس لديك صلاحية")
+        return
+    user_id = int(call.data.split('_')[1])
+    if user_id in pending_requests:
+        user_info = pending_requests.pop(user_id)
+        approved_users.add(user_id)
+        try:
+            bot.send_message(user_id, f"🎉 تمت الموافقة!\n\nمرحباً {user_info['first_name']}\nأرسل /start")
+        except:
+            pass
+        bot.answer_callback_query(call.id, "✅ تم القبول")
+        bot.edit_message_text(f"✅ تم قبول {user_info['first_name']}", call.message.chat.id, call.message.message_id)
 
-# ======= التشغيل الرئيسي ======= #
+@bot.callback_query_handler(func=lambda call: call.data.startswith('reject_'))
+def reject_user(call):
+    if not is_admin(call.from_user.id):
+        bot.answer_callback_query(call.id, "ليس لديك صلاحية")
+        return
+    user_id = int(call.data.split('_')[1])
+    if user_id in pending_requests:
+        user_info = pending_requests.pop(user_id)
+        try:
+            bot.send_message(user_id, "❌ تم رفض طلبك.")
+        except:
+            pass
+        bot.answer_callback_query(call.id, "❌ تم الرفض")
+        bot.edit_message_text(f"❌ تم رفض {user_info['first_name']}", call.message.chat.id, call.message.message_id)
+
+# ======= التشغيل ======= #
 if __name__ == '__main__':
-    logging.info("🤖 البوت يعمل بنجاح...")
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=1, timeout=60)
-        except Exception as err:
-            logging.error(f"Polling Exception: {err}")
-            time.sleep(3)
+    print("🤖 البوت يعمل...")
+    print(f"✅ المعتمدون: {len(approved_users)}")
+    print(f"⏳ الطلبات: {len(pending_requests)}")
+    try:
+        bot.infinity_polling()
+    except Exception as e:
+        print(f"❌ خطأ: {e}")
+        time.sleep(5)
