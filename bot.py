@@ -96,7 +96,9 @@ ADMIN_ID = int(os.getenv('ADMIN_ID', '1920665874'))
 YOUR_USERNAME = '@u_8_y'
 ADMIN_CHANNEL = '@FD_CQ'
 
-UPLOADED_FILES_DIR = "uploaded_files"
+# مهم: استخدام مسار مطلق للمجلد الأساسي
+BASE_DIR = os.path.abspath(os.getcwd())
+UPLOADED_FILES_DIR = os.path.join(BASE_DIR, "uploaded_files")
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -107,6 +109,9 @@ protection_enabled = True
 bot_running = True
 
 os.makedirs(UPLOADED_FILES_DIR, exist_ok=True)
+
+logging.info(f"📁 Base directory: {BASE_DIR}")
+logging.info(f"📁 Uploads directory: {UPLOADED_FILES_DIR}")
 
 # ============================================================
 # قاعدة البيانات
@@ -226,6 +231,9 @@ def looks_prompt(text):
 # تشغيل الملفات
 # ============================================================
 def start_file(script_path, chat_id, file_id):
+    # ✅ إصلاح: تحويل المسار إلى مطلق دائماً
+    script_path = os.path.abspath(script_path)
+
     with lock:
         if chat_id not in active_processes:
             active_processes[chat_id] = {}
@@ -239,8 +247,9 @@ def start_file(script_path, chat_id, file_id):
             }
 
         info = active_processes[chat_id][file_id]
-        proc = info.get('process')
+        info['path'] = script_path  # تأكد من تحديث المسار
 
+        proc = info.get('process')
         if proc and proc.poll() is None:
             try:
                 bot.send_message(chat_id, "⚠️ الملف يعمل بالفعل.")
@@ -248,13 +257,28 @@ def start_file(script_path, chat_id, file_id):
                 pass
             return
 
+        # تحقق أن الملف موجود فعلاً
+        if not os.path.exists(script_path):
+            try:
+                bot.send_message(
+                    chat_id,
+                    f"❌ الملف غير موجود على السيرفر:\n<code>{eh(script_path)}</code>",
+                    parse_mode='HTML'
+                )
+            except Exception:
+                pass
+            return
+
         try:
+            # ✅ إصلاح: cwd = مجلد الملف المطلق
             work_dir = os.path.dirname(script_path)
 
-            # بيئة نظيفة للملف + دعم UTF-8
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
             env['PYTHONIOENCODING'] = 'utf-8'
+
+            logging.info(f"🚀 تشغيل: {script_path}")
+            logging.info(f"📁 من: {work_dir}")
 
             p = subprocess.Popen(
                 [sys.executable, "-u", script_path],
@@ -704,9 +728,14 @@ def handle_doc(message):
         user_dir = os.path.join(UPLOADED_FILES_DIR, str(uid))
         os.makedirs(user_dir, exist_ok=True)
 
-        save_path = os.path.join(user_dir, f"{file_id}_{file_name}")
+        # ✅ إصلاح: مسار مطلق
+        save_path = os.path.abspath(os.path.join(user_dir, f"{file_id}_{file_name}"))
+
         with open(save_path, 'wb') as f:
             f.write(downloaded)
+
+        logging.info(f"💾 تم حفظ الملف في: {save_path}")
+        logging.info(f"📊 حجم الملف: {len(downloaded)} bytes")
 
         if protection_enabled:
             bad, reason = scan_file(save_path, uid)
@@ -1133,6 +1162,8 @@ if __name__ == '__main__':
     logging.info("🤖 Bot starting...")
     logging.info(f"👨‍💻 Admin: {ADMIN_ID}")
     logging.info(f"📢 Channel: {ADMIN_CHANNEL}")
+    logging.info(f"📁 BASE_DIR: {BASE_DIR}")
+    logging.info(f"📁 UPLOADS: {UPLOADED_FILES_DIR}")
     logging.info("=" * 55)
 
     while True:
