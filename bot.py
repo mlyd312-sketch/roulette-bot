@@ -105,10 +105,10 @@ logging.basicConfig(
 )
 
 # ======= الثوابت والإعدادات ======= #
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8370311910:AAFZ98o4EYB6qxeMUVU9jUmSH2BqPbk8QtI')
-ADMIN_ID = int(os.getenv('ADMIN_ID', 7750762594))
-YOUR_USERNAME = '@ew1t_7'
-ADMIN_CHANNEL = '@M_6FW'
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8877293036:AAGg_82F0bT1Bhov42sk9qDcRMsVNpfnErw')
+ADMIN_ID = int(os.getenv('ADMIN_ID', 1920665874))
+YOUR_USERNAME = '@u_8_y'
+ADMIN_CHANNEL = '@FD_CQ'
 
 UPLOADED_FILES_DIR = "uploaded_files"
 SUSPICIOUS_FILES_DIR = 'suspicious_files'
@@ -577,7 +577,9 @@ def show_main_menu(message):
     bot.send_message(
         message.chat.id,
         f"{ce('python')} <b>مرحباً بك في منصة Python Hosting</b>\n\n"
-        f"مرحباً، {first_name}! {ce('sparkles')}\n"
+        f"مرحباً، {first_name}! {ce('sparkles')}\n\n"
+        f"{ce('people')} المطور: {YOUR_USERNAME}\n"
+        f"{ce('link')} القناة: {ADMIN_CHANNEL}\n\n"
         f"اختر الخدمة المطلوبة من الأزرار أدناه:",
         reply_markup=markup,
         parse_mode='HTML'
@@ -1063,7 +1065,9 @@ def about_bot_handler(call):
             f"{ce('python')} منصة لرفع واستضافة ملفات بايثون\n"
             f"{ce('folder')} تشغيل عدة ملفات في وقت واحد\n"
             f"{ce('phone')} تفاعل ذكي مع طلبات الرقم/OTP/2FA\n"
-            f"{ce('shield')} نظام حماية متقدم",
+            f"{ce('shield')} نظام حماية متقدم\n\n"
+            f"{ce('people')} <b>المطور:</b> {YOUR_USERNAME}\n"
+            f"{ce('link')} <b>القناة:</b> {ADMIN_CHANNEL}",
             call.message.chat.id,
             call.message.message_id,
             reply_markup=markup,
