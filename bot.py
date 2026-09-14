@@ -7,6 +7,7 @@ import re
 import ast
 import time
 import uuid
+import queue
 import sqlite3
 import logging
 import threading
@@ -148,24 +149,22 @@ pending_inputs = {}
 waiting_library = set()
 
 # تتبع آخر رسالة مرسلة لكل ملف (لمنع التكرار)
-last_prompt_sent = {}   # {file_id: (text, timestamp)}
-last_error_sent  = {}   # {file_id: (text, timestamp)}
+last_prompt_sent = {}
+last_error_sent  = {}
 
 # ============================================================
 # كلمات مفتاحية فقط لطلبات الإدخال الحقيقية (رقم/كود/تحقق/2FA)
 # ============================================================
 PROMPT_KEYWORDS = [
     # عربي
-    'أرسل رمز', 'ارسل رمز', 'أرسل كود', 'ارسل كود',
-    'أدخل رمز', 'أدخل كود', 'ادخل الرمز', 'ادخل الكود',
-    'أدخل رقم', 'ادخل رقم', 'أرسل رقم', 'ارسل رقم',
-    'رقم الهاتف', 'الرجاء إدخال', 'رمز التحقق', 'كود التحقق',
-    'كلمة سر', 'كلمة المرور', 'التحقق بخطوتين', 'بخطوتين',
+    'أرسل رمز', 'ارسل رمز', 'أرسل كود', 'ارسل كود', 'أرسل رقم', 'ارسل رقم',
+    'أدخل رمز', 'أدخل كود', 'ادخل الرمز', 'ادخل الكود', 'أدخل رقم', 'ادخل رقم',
+    'رقم الهاتف', 'الرجاء إدخال', 'رمز التحقق', 'كود التحقق', 'كلمة سر', 'كلمة المرور',
+    'التحقق بخطوتين', 'بخطوتين', 'الرمز', 'الكود', 'الهاتف', 'التحقق', 'ادخل', 'أدخل',
     # إنجليزي
-    'enter the phone', 'enter phone', 'phone number',
-    'enter code', 'enter the code', 'enter password',
-    'two-step', '2fa', 'verification code', 'please enter',
-    'enter your', 'otp', 'code:', 'password:', 'number:',
+    'enter the phone', 'enter phone', 'phone number', 'enter code', 'enter the code',
+    'enter password', 'two-step', '2fa', 'verification code', 'please enter',
+    'enter your', 'otp', 'code:', 'password:', 'number:', 'phone:', 'input:'
 ]
 
 def looks_prompt(text):
@@ -233,7 +232,7 @@ def start_file(script_path, chat_id, file_id):
             info['process'] = p
             info['started_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # أزرار التحكم دائمة ومضمونة الظهور أسفل رسالة التشغيل
+            # أزرار التحكم
             markup = types.InlineKeyboardMarkup(row_width=3)
             markup.add(
                 types.InlineKeyboardButton("🛑 إيقاف", callback_data=f'sf_{file_id}'),
@@ -264,9 +263,25 @@ def start_file(script_path, chat_id, file_id):
                 pass
 
 # ============================================================
-# مراقبة المخرجات واكتشاف طلبات الكود فوراً (بدون تكرار)
+# مراقبة المخرجات (تستخدم Queue لمنع التعليق عند input بدون \n)
 # ============================================================
+def enqueue_output(out, q):
+    """يقرأ الحروف من stdout ويضعها في Queue"""
+    while True:
+        try:
+            ch = out.read(1)
+            if not ch:
+                break
+            q.put(ch)
+        except Exception:
+            break
+
 def monitor_output(chat_id, file_id, process):
+    q = queue.Queue()
+    t = threading.Thread(target=enqueue_output, args=(process.stdout, q))
+    t.daemon = True
+    t.start()
+
     buffer = ""
     last_prompt_sent[file_id] = ("", 0)
     last_error_sent[file_id]  = ("", 0)
@@ -280,9 +295,7 @@ def monitor_output(chat_id, file_id, process):
         last_prompt_sent[file_id] = (line, now)
         pending_inputs[chat_id] = file_id
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton(
-            "❌ إلغاء الطلب", callback_data=f'ci_{file_id}'
-        ))
+        markup.add(types.InlineKeyboardButton("❌ إلغاء الطلب", callback_data=f'ci_{file_id}'))
         try:
             bot.send_message(
                 chat_id,
@@ -311,11 +324,69 @@ def monitor_output(chat_id, file_id, process):
         except Exception as e:
             logging.error(f"send error: {e}")
 
+    def process_buffer(force=False):
+        nonlocal buffer
+        if not buffer.strip():
+            return
+        # إذا لم يكن إجبارياً، ننتظر سطر جديد أو طول كبير
+        if not force and '\n' not in buffer and len(buffer) < 150:
+            return
+
+        line = buffer.strip()
+        buffer = ""
+
+        if len(line) < 2:
+            return
+        if set(line) <= {'.', '!', '-', '_', ' ', '*', '=', '~'}:
+            return
+
+        # 1) طلب إدخال حقيقي
+        if looks_prompt(line):
+            _send_prompt(line)
+        # 2) خطأ حقيقي
+        elif ('traceback' in line.lower()
+              or 'error' in line.lower()
+              or 'exception' in line.lower()):
+            _send_error(line)
+
     try:
         while True:
-            ch = process.stdout.read(1)
-            if not ch:
+            try:
+                # محاولة القراءة من الـ Queue مع مهلة ثانية واحدة
+                ch = q.get(timeout=1.0)
+                try:
+                    decoded = ch.decode('utf-8', errors='ignore')
+                except Exception:
+                    decoded = ch
+                buffer += decoded
+
+                if '\n' in decoded:
+                    process_buffer()
+                elif len(buffer) > 500:
+                    process_buffer()
+
+            except queue.Empty:
+                # انتهت المهلة (لا يوجد إخراج جديد)
+                # إذا كان هناك شيء في البافر، قد يكون طلب إدخال بدون سطر جديد
+                if buffer.strip() and looks_prompt(buffer):
+                    process_buffer(force=True)
+
+                # التحقق مما إذا كان الملف قد انتهى
                 if process.poll() is not None:
+                    # تفريغ ما تبقى في الـ Queue
+                    while not q.empty():
+                        try:
+                            ch = q.get_nowait()
+                            try:
+                                decoded = ch.decode('utf-8', errors='ignore')
+                            except Exception:
+                                decoded = ch
+                            buffer += decoded
+                        except queue.Empty:
+                            break
+                    if buffer.strip():
+                        process_buffer(force=True)
+
                     exit_code = process.poll()
                     icon = "✅" if exit_code == 0 else "❌"
                     txt = "انتهى الملف بنجاح" if exit_code == 0 else f"توقف بكود خطأ: {exit_code}"
@@ -328,42 +399,16 @@ def monitor_output(chat_id, file_id, process):
                     except Exception:
                         pass
                     break
-                time.sleep(0.1)
-                continue
 
-            try:
-                decoded = ch.decode('utf-8', errors='ignore')
-            except Exception:
-                continue
-
-            buffer += decoded
-
-            # نطلق المعالجة عند نهاية السطر أو عند طول كبير
-            if '\n' in decoded or len(buffer) > 150:
-                line = buffer.strip()
-                buffer = ""
-
-                if not line or len(line) < 2:
-                    continue
-                if set(line) <= {'.', '!', '-', '_', ' ', '*', '=', '~'}:
-                    continue
-
-                # 1) طلب إدخال حقيقي
-                if looks_prompt(line):
-                    _send_prompt(line)
-
-                # 2) خطأ حقيقي
-                elif ('traceback' in line.lower()
-                      or 'error' in line.lower()
-                      or 'exception' in line.lower()):
-                    _send_error(line)
+            except Exception as e:
+                logging.error(f"monitor read error: {e}")
+                time.sleep(0.5)
 
     except Exception as e:
         logging.error(f"monitor error [{chat_id}/{file_id}]: {e}")
     finally:
         if pending_inputs.get(chat_id) == file_id:
             pending_inputs.pop(chat_id, None)
-        # تنظيف الذاكرة
         last_prompt_sent.pop(file_id, None)
         last_error_sent.pop(file_id, None)
 
