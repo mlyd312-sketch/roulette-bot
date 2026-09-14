@@ -1,10 +1,4 @@
 import sys
-import io
-
-# إصلاح ترميز الحروف لمنع ظهور الرموز التالفة في مخرجات الاستضافة
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-
 import asyncio
 import threading
 import re
