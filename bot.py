@@ -17,12 +17,12 @@ from concurrent.futures import ThreadPoolExecutor
 import telebot
 from telebot import types
 
-# منع ظهور الرموز التالفة وتحديد ترميز المخرجات افتراضياً
+# ضبط إعدادات ترميز النظام لمنع أي تداخل
 try:
     if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stdout.reconfigure(encoding='utf-8', errors='ignore')
     if hasattr(sys.stderr, 'reconfigure'):
-        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='ignore')
 except Exception:
     pass
 
@@ -217,7 +217,7 @@ def looks_prompt(text):
 
 
 # ============================================================
-# تشغيل الملفات
+# تشغيل الملفات (يدعم البوتات الحديثة والمتقدمة)
 # ============================================================
 def start_file(script_path, chat_id, file_id):
     script_path = os.path.abspath(script_path)
@@ -255,6 +255,7 @@ def start_file(script_path, chat_id, file_id):
         try:
             work_dir = os.path.dirname(script_path)
             env = os.environ.copy()
+            # إجبار البوتات الحديثة على إرسال المخرجات فوراً بدون تخزين مؤقت
             env['PYTHONUNBUFFERED'] = '1'
             env['PYTHONIOENCODING'] = 'utf-8'
 
@@ -301,6 +302,9 @@ def start_file(script_path, chat_id, file_id):
                 pass
 
 
+# ============================================================
+# مراقبة المخرجات وتنظيف الرموز التالفة كلياً
+# ============================================================
 def monitor_output(chat_id, file_id, process):
     buffer = ""
     shown_lines = 0
@@ -314,10 +318,14 @@ def monitor_output(chat_id, file_id, process):
             return
         text = "\n".join(pending_batch[:20])
         pending_batch = []
+        
+        # تصفية النصوص وتنظيفها نهائياً من أي رموز مربعات أو شيفرات تالفة
+        clean_text = "".join(c if ord(c) < 128 or c.isspace() or ('\u0600' <= c <= '\u06FF') else '?' for c in text)
+        
         try:
             bot.send_message(
                 chat_id,
-                f"📄 <b>مخرجات الملف:</b>\n<pre>{eh(text[:3000])}</pre>",
+                f"📄 <b>مخرجات الملف:</b>\n<pre>{eh(clean_text[:3000])}</pre>",
                 parse_mode='HTML'
             )
         except Exception as e:
@@ -354,7 +362,8 @@ def monitor_output(chat_id, file_id, process):
                 continue
 
             try:
-                decoded = ch.decode('utf-8', errors='replace')
+                # تجاهل الأخطاء بصمت بدلاً من تحويلها إلى رموز تالفة
+                decoded = ch.decode('utf-8', errors='ignore')
             except Exception:
                 continue
 
@@ -955,7 +964,7 @@ def cb_approve(call):
 def cb_reject(call):
     if not is_admin(call.from_user.id):
         return
-    uid = int(call.data.split('_')[1])
+    uid = int(call.data.split('_')-1 if False else call.data.split('_')[1])
     remove_pending(uid)
     bot.answer_callback_query(call.id, "❌ تم الرفض")
 
