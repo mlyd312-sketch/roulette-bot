@@ -32,7 +32,7 @@ def eh(text):
     return html.escape(str(text))
 
 # ============================================================
-# كلمات مفتاحية مخصصة للتحقق من طلبات الإدخال (الأرقام والرموز)
+# كلمات مفتاحية دقيقة لطلبات الإدخال (تمت تصفياتها لمنع التكرار)
 # ============================================================
 INPUT_KEYWORDS = [
     'أرسل', 'ارسل', 'ادخل', 'أدخل', 'اكتب', 'رقم الهاتف', 'كود التحقق',
@@ -42,16 +42,17 @@ INPUT_KEYWORDS = [
 ]
 
 def looks_prompt(text):
-    """فحص ما إذا كان السطر المطبوع عبارة عن طلب إدخال حقيقي ومنع الرسائل الكاذبة"""
-    if not text or len(text.strip()) < 3:
+    """فحص السطر والتأكد التام أنه ليس رسالة خطأ برمجية أو خطأ شبكة"""
+    if not text or len(text.strip()) < 4:
         return False
     t = text.lower()
     
-    # استثناء جميع أخطاء النظام والشبكة وتليجرام لمنع إرسال لوحة إدخال كاذبة
+    # قائمة الأخطاء الشائعة التي يجب تجاهلها تماماً وعدم اعتبارها طلب إدخال
     ignore_errors = [
         'traceback', 'exception', 'error', 'failed', 'connection', 
         'telebot', 'pyrogram', 'telegram api', 'unsuccessful', 
-        'connection reset', 'aborted', 'requests', 'urllib3'
+        'connection reset', 'aborted', 'requests', 'urllib3',
+        'sql', 'sqlite', 'database', 'invalid token', 'unauthorized'
     ]
     if any(err in t for err in ignore_errors):
         return False
@@ -59,21 +60,22 @@ def looks_prompt(text):
     return any(kw.lower() in t for kw in INPUT_KEYWORDS)
 
 # ============================================================
-# دالة مراقبة ومتابعة مخرجات الملفات ولوحة الإدخال
+# دالة مراقبة ومتابعة مخرجات الملفات مع مانع التكرار
 # ============================================================
 def monitor_output(chat_id, file_id, process):
-    """مراقبة مخرجات الملف وإظهار لوحة طلب الإدخال فور طلب السكربت رقم أو كود"""
+    """مراقبة مخرجات الملف وإرسال اللوحة مرة واحدة فقط عند طلب السكربت كود أو رقم"""
     buffer = ""
     shown_lines = 0
     MAX_SHOWN = 50
     pending_batch = []
     last_flush = time.time()
+    prompt_sent = False  # قفل لمنع تكرار لوحة الإدخال لنفس السكربت
 
     def flush_batch():
         nonlocal pending_batch, last_flush
         if not pending_batch:
             return
-        text = "\n".join(pending_batch[:40])
+        text = "\n".join(pending_batch[:30])
         pending_batch = []
         try:
             bot.send_message(
@@ -117,7 +119,7 @@ def monitor_output(chat_id, file_id, process):
                         pass
                     break
 
-                if pending_batch and (time.time() - last_flush) > 3.0:
+                if pending_batch and (time.time() - last_flush) > 4.0:
                     flush_batch()
                 time.sleep(0.05)
                 continue
@@ -129,7 +131,7 @@ def monitor_output(chat_id, file_id, process):
 
             buffer += decoded
 
-            # فحص الأسطر المطبوعة
+            # الاعتماد حصراً على أسطر مكتملة فقط لتفادي التقطيع والتكرار
             if '\n' in decoded:
                 line = buffer.strip()
                 buffer = ""
@@ -137,11 +139,12 @@ def monitor_output(chat_id, file_id, process):
                 if not line:
                     continue
 
-                # لوحة استقبال طلبات الإدخال (الأرقام والرموز)
+                # التثبت من طلب الإدخال ومنع التكرار نهائياً بواسطة قفل prompt_sent
                 if looks_prompt(line):
-                    if pending_inputs.get(chat_id) != file_id:
+                    if not prompt_sent and pending_inputs.get(chat_id) != file_id:
                         flush_batch()
                         pending_inputs[chat_id] = file_id
+                        prompt_sent = True  # تفعيل القفل
                         
                         markup = types.InlineKeyboardMarkup()
                         markup.add(types.InlineKeyboardButton("❌ إلغاء الإدخال", callback_data=f'ci_{file_id}'))
@@ -163,7 +166,8 @@ def monitor_output(chat_id, file_id, process):
                         pending_batch.append(line)
                         shown_lines += 1
 
-                    if (time.time() - last_flush) > 3.0 or len(pending_batch) >= 20:
+                    # رفع مهلة التجميع إلى 4 ثوانٍ أو 25 سطر لمنع غرق الدردشة بالرسائل
+                    if (time.time() - last_flush) > 4.0 or len(pending_batch) >= 25:
                         flush_batch()
 
     except Exception as e:
@@ -212,7 +216,6 @@ def handle_document(message):
         with open(file_path, 'wb') as new_file:
             new_file.write(downloaded_file)
 
-        # تشغيل الملف بوضع unbuffered (-u) لالتقاط المخرجات فوراً
         proc = subprocess.Popen(
             [sys.executable, '-u', file_path],
             stdin=subprocess.PIPE,
@@ -278,10 +281,9 @@ def cancel_input(call):
         )
 
 if __name__ == '__main__':
-    logging.info("Bot is starting...")
-    # إزالة الـ Webhook القديم لضمان عمل getUpdates بانتظام دون تعارض
+    logging.info("Bot starting up...")
     try:
         bot.remove_webhook()
     except Exception:
         pass
-    bot.infinity_polling(timeout=10, long_polling_timeout=5)
+    bot.infinity_polling(timeout=20, long_polling_timeout=10)
