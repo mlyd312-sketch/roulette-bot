@@ -97,7 +97,7 @@ YOUR_USERNAME = '@u_8_y'
 ADMIN_CHANNEL = '@FD_CQ'
 
 UPLOADED_FILES_DIR = "uploaded_files"
-MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_FILE_SIZE = 10 * 1024 * 1024
 
 bot = telebot.TeleBot(BOT_TOKEN)
 executor = ThreadPoolExecutor(max_workers=10)
@@ -208,7 +208,9 @@ INPUT_KEYWORDS = [
     'otp', 'phone', 'code', 'password', 'pass', '2fa',
     'كلمة السر', 'كلمة سر', 'التحقق', 'الهاتف', 'هاتف',
     'input', 'enter', 'token', 'session', 'api_id', 'api_hash',
-    'bot_token', 'user', 'username', 'auth', 'key', 'verify'
+    'bot_token', 'user', 'username', 'auth', 'key', 'verify',
+    'number', 'account', 'login', 'sign', 'pin', 'secret',
+    'text', 'message', 'reply'
 ]
 PROMPT_END = ('؟', '?', ':', '!', '؛')
 
@@ -248,13 +250,21 @@ def start_file(script_path, chat_id, file_id):
 
         try:
             work_dir = os.path.dirname(script_path)
+
+            # بيئة نظيفة للملف + دعم UTF-8
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
+            env['PYTHONIOENCODING'] = 'utf-8'
+
             p = subprocess.Popen(
                 [sys.executable, "-u", script_path],
                 cwd=work_dir,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                bufsize=0
+                bufsize=0,
+                env=env,
+                start_new_session=True
             )
             info['process'] = p
             info['started_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -274,8 +284,9 @@ def start_file(script_path, chat_id, file_id):
                 chat_id,
                 f"✅ <b>تم تشغيل الملف بنجاح</b>\n"
                 f"📁 <code>{eh(info['name'])}</code>\n"
-                f"🆔 <code>{file_id}</code>\n\n"
-                f"⚡ جارٍ مراقبة المدخلات...",
+                f"🆔 <code>{file_id}</code>\n"
+                f"PID: <code>{p.pid}</code>\n\n"
+                f"⚡ جارٍ مراقبة الإخراج والمدخلات...",
                 reply_markup=markup,
                 parse_mode='HTML'
             )
@@ -296,28 +307,63 @@ def start_file(script_path, chat_id, file_id):
 
 
 def monitor_output(chat_id, file_id, process):
+    """يعرض كل إخراج الملف + يكتشف طلبات الإدخال + يخبر عند التوقف"""
     buffer = ""
+    shown_lines = 0
+    MAX_SHOWN = 50
+    pending_batch = []
+    last_flush = time.time()
+
+    def flush_batch():
+        nonlocal pending_batch, last_flush
+        if not pending_batch:
+            return
+        text = "\n".join(pending_batch[:40])
+        pending_batch = []
+        try:
+            bot.send_message(
+                chat_id,
+                f"📄 <b>إخراج الملف:</b>\n<pre>{eh(text[:3500])}</pre>",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logging.error(f"send output: {e}")
+        last_flush = time.time()
+
     try:
         while True:
             try:
                 ch = process.stdout.read(1)
-            except Exception:
+            except Exception as e:
+                logging.error(f"read error [{chat_id}/{file_id}]: {e}")
                 break
 
             if not ch:
                 if process.poll() is not None:
                     remaining = buffer.strip()
-                    if remaining and len(remaining) > 5:
-                        try:
-                            bot.send_message(
-                                chat_id,
-                                f"📄 <b>آخر إخراج:</b>\n<code>{eh(remaining[:800])}</code>",
-                                parse_mode='HTML'
-                            )
-                        except Exception:
-                            pass
+                    if remaining:
+                        pending_batch.append(remaining)
+                    flush_batch()
+
+                    exit_code = process.poll()
+                    status_icon = "✅" if exit_code == 0 else "❌"
+                    status_text = "انتهى بنجاح" if exit_code == 0 else f"توقف بكود خطأ: {exit_code}"
+
+                    try:
+                        bot.send_message(
+                            chat_id,
+                            f"{status_icon} <b>الملف {status_text}</b>\n"
+                            f"🆔 <code>{file_id}</code>\n"
+                            f"📊 عدد الأسطر المعروضة: {shown_lines}",
+                            parse_mode='HTML'
+                        )
+                    except Exception:
+                        pass
                     break
-                time.sleep(0.05)
+
+                if pending_batch and (time.time() - last_flush) > 1.5:
+                    flush_batch()
+                time.sleep(0.03)
                 continue
 
             try:
@@ -326,15 +372,17 @@ def monitor_output(chat_id, file_id, process):
                 continue
 
             buffer += decoded
-            flush = '\n' in decoded or (decoded in PROMPT_END and len(buffer.strip()) >= 4)
+            flush = ('\n' in decoded) or (decoded in PROMPT_END and len(buffer.strip()) >= 4)
 
             if flush:
                 line = buffer.strip()
                 buffer = ""
-                if not line or len(line) < 3:
+
+                if not line or len(line) < 1:
                     continue
 
                 if looks_prompt(line):
+                    flush_batch()
                     pending_inputs[chat_id] = file_id
                     markup = types.InlineKeyboardMarkup()
                     markup.add(types.InlineKeyboardButton(
@@ -352,8 +400,15 @@ def monitor_output(chat_id, file_id, process):
                         )
                     except Exception as e:
                         logging.error(f"send prompt: {e}")
+                else:
+                    if shown_lines < MAX_SHOWN:
+                        pending_batch.append(line)
+                        shown_lines += 1
+                    if (time.time() - last_flush) > 1.5 or len(pending_batch) >= 15:
+                        flush_batch()
+
     except Exception as e:
-        logging.error(f"monitor error: {e}")
+        logging.error(f"monitor error [{chat_id}/{file_id}]: {e}")
     finally:
         if pending_inputs.get(chat_id) == file_id:
             pending_inputs.pop(chat_id, None)
@@ -371,12 +426,15 @@ def stop_one(chat_id, file_id, delete=False):
             proc.stdin.close()
         except Exception:
             pass
-        proc.terminate()
         try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        except Exception as e:
+            logging.error(f"stop error: {e}")
 
     if pending_inputs.get(chat_id) == file_id:
         pending_inputs.pop(chat_id, None)
@@ -491,6 +549,9 @@ def show_menu(message):
             f"مرحباً، {fname}! ✨\n\n"
             f"👨‍💻 المطور: {YOUR_USERNAME}\n"
             f"📢 القناة: {ADMIN_CHANNEL}\n\n"
+            f"✅ يدعم Telethon / Pyrogram / Aiogram\n"
+            f"📂 تشغيل عدة ملفات متزامنة\n"
+            f"📨 تفاعل ذكي مع الرقم / OTP / 2FA\n\n"
             f"اختر الخدمة:",
             reply_markup=markup,
             parse_mode='HTML'
@@ -561,7 +622,7 @@ def handle_library_name(message):
     waiting_library.discard(chat_id)
 
     lib_name = (message.text or '').strip()
-    if not re.match(r'^[a-zA-Z0-9_\-\.]+$', lib_name):
+    if not re.match(r'^[a-zA-Z0-9_\-\.]+(\s*[<>=!]+\s*[0-9a-zA-Z\.\-]+)?$', lib_name):
         try:
             bot.send_message(chat_id, "❌ اسم غير صالح.")
         except Exception:
@@ -577,7 +638,7 @@ def handle_library_name(message):
         try:
             r = subprocess.run(
                 [sys.executable, "-m", "pip", "install", lib_name],
-                capture_output=True, text=True, timeout=180
+                capture_output=True, text=True, timeout=300
             )
             if r.returncode == 0:
                 msg = f"✅ تم تثبيت <code>{eh(lib_name)}</code> بنجاح"
@@ -624,14 +685,14 @@ def handle_doc(message):
 
         if not file_name.endswith('.py'):
             try:
-                bot.reply_to(message, "❌ فقط .py")
+                bot.reply_to(message, "❌ فقط ملفات .py مسموحة")
             except Exception:
                 pass
             return
 
         if doc.file_size and doc.file_size > MAX_FILE_SIZE:
             try:
-                bot.reply_to(message, "⛔ الحجم > 5MB")
+                bot.reply_to(message, f"⛔ الحجم يتجاوز {MAX_FILE_SIZE // (1024*1024)}MB")
             except Exception:
                 pass
             return
@@ -750,7 +811,7 @@ def cb_info(call):
     pid = proc.pid if (proc and proc.poll() is None) else "—"
     bot.answer_callback_query(
         call.id,
-        f"📁 {info['name']}\n{status}\nPID: {pid}\n🆔 {fid}",
+        f"📁 {info['name']}\n{status}\nPID: {pid}\n🆔 {fid}\n⏰ {info.get('started_at', '—')}",
         show_alert=True
     )
 
@@ -850,7 +911,10 @@ def cb_upload(call):
     try:
         bot.send_message(
             call.message.chat.id,
-            "📥 <b>أرسل ملف .py الآن</b>",
+            "📥 <b>أرسل ملف .py الآن</b>\n\n"
+            f"• الحد الأقصى: {MAX_FILE_SIZE // (1024*1024)}MB\n"
+            f"• يدعم: Telethon / Pyrogram / Aiogram / telebot\n"
+            f"• يعرض كل الإخراج + طلبات الإدخال",
             parse_mode='HTML'
         )
     except Exception:
@@ -877,8 +941,10 @@ def cb_about(call):
             call.message.chat.id,
             f"ℹ️ <b>حول البوت</b>\n\n"
             f"🐍 منصة استضافة Python\n"
-            f"📂 دعم ملفات متعددة\n"
-            f"📞 تفاعل ذكي (رقم/OTP)\n\n"
+            f"📂 تشغيل ملفات متعددة\n"
+            f"🤖 يدعم Telethon / Pyrogram / Aiogram\n"
+            f"📨 تفاعل ذكي (رقم / OTP / 2FA)\n"
+            f"📄 عرض كامل للإخراج + Exit code\n\n"
             f"👨‍💻 {YOUR_USERNAME}\n📢 {ADMIN_CHANNEL}",
             reply_markup=markup, parse_mode='HTML'
         )
@@ -910,7 +976,12 @@ def cb_install(call):
     bot.answer_callback_query(call.id)
     waiting_library.add(call.message.chat.id)
     try:
-        bot.send_message(call.message.chat.id, "📚 أرسل اسم المكتبة:")
+        bot.send_message(
+            call.message.chat.id,
+            "📚 أرسل اسم المكتبة:\n"
+            "مثال: <code>telethon</code> أو <code>pyrogram</code> أو <code>aiogram</code>",
+            parse_mode='HTML'
+        )
     except Exception:
         pass
 
@@ -960,7 +1031,7 @@ def cb_bot_status(call):
     bot.answer_callback_query(call.id)
     try:
         bot.edit_message_text(
-            f"⚡ البوت: {'✅' if bot_running else '⏸️'}",
+            f"⚡ البوت: {'✅ يعمل' if bot_running else '⏸️ متوقف'}",
             call.message.chat.id, call.message.message_id, reply_markup=markup
         )
     except Exception:
