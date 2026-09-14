@@ -4,9 +4,9 @@ import time
 import subprocess
 import threading
 import logging
+import html
 import telebot
 from telebot import types
-import html
 
 # إعداد التسجيل (Logging)
 logging.basicConfig(
@@ -24,10 +24,8 @@ CHANNEL_USERNAME = '@FD_CQ'
 bot = telebot.TeleBot(API_TOKEN)
 
 # تتبع العمليات الشغالة والإدخالات المعلقة
-# active_processes: { (chat_id, file_id): subprocess.Popen }
-active_processes = {}
-# pending_inputs: { chat_id: file_id }
-pending_inputs = {}
+active_processes = {}  # { (chat_id, file_id): subprocess.Popen }
+pending_inputs = {}    # { chat_id: file_id }
 
 def eh(text):
     """تجهيز النص للعرض في تليجرام باستخدام HTML"""
@@ -44,13 +42,20 @@ INPUT_KEYWORDS = [
 ]
 
 def looks_prompt(text):
-    """فحص ما إذا كان السطر المطبوع عبارة عن طلب إدخال حقيقي"""
+    """فحص ما إذا كان السطر المطبوع عبارة عن طلب إدخال حقيقي ومنع الرسائل الكاذبة"""
     if not text or len(text.strip()) < 3:
         return False
     t = text.lower()
-    # استثناء أسطر الأخطاء البرمجية حتى لا تُعتبر طلب إدخال
-    if any(err in t for err in ['traceback', 'exception', 'error', 'failed', 'connection', 'telebot', 'pyrogram']):
+    
+    # استثناء جميع أخطاء النظام والشبكة وتليجرام لمنع إرسال لوحة إدخال كاذبة
+    ignore_errors = [
+        'traceback', 'exception', 'error', 'failed', 'connection', 
+        'telebot', 'pyrogram', 'telegram api', 'unsuccessful', 
+        'connection reset', 'aborted', 'requests', 'urllib3'
+    ]
+    if any(err in t for err in ignore_errors):
         return False
+        
     return any(kw.lower() in t for kw in INPUT_KEYWORDS)
 
 # ============================================================
@@ -125,9 +130,10 @@ def monitor_output(chat_id, file_id, process):
             buffer += decoded
 
             # فحص الأسطر المطبوعة
-            if '\n' in decoded or any(symbol in buffer for symbol in [':', '?', '>']):
+            if '\n' in decoded:
                 line = buffer.strip()
-                
+                buffer = ""
+
                 if not line:
                     continue
 
@@ -136,7 +142,6 @@ def monitor_output(chat_id, file_id, process):
                     if pending_inputs.get(chat_id) != file_id:
                         flush_batch()
                         pending_inputs[chat_id] = file_id
-                        buffer = ""  # تصفير الموقت لمنع التكرار
                         
                         markup = types.InlineKeyboardMarkup()
                         markup.add(types.InlineKeyboardButton("❌ إلغاء الإدخال", callback_data=f'ci_{file_id}'))
@@ -154,14 +159,12 @@ def monitor_output(chat_id, file_id, process):
                         except Exception as e:
                             logging.error(f"send prompt error: {e}")
                 else:
-                    if '\n' in decoded:
-                        buffer = ""
-                        if shown_lines < MAX_SHOWN:
-                            pending_batch.append(line)
-                            shown_lines += 1
+                    if shown_lines < MAX_SHOWN:
+                        pending_batch.append(line)
+                        shown_lines += 1
 
-                        if (time.time() - last_flush) > 3.0 or len(pending_batch) >= 20:
-                            flush_batch()
+                    if (time.time() - last_flush) > 3.0 or len(pending_batch) >= 20:
+                        flush_batch()
 
     except Exception as e:
         logging.error(f"monitor error [{chat_id}/{file_id}]: {e}")
@@ -209,7 +212,7 @@ def handle_document(message):
         with open(file_path, 'wb') as new_file:
             new_file.write(downloaded_file)
 
-        # تشغيل الملف مع تفعيل النمط اللحظي للـ stdout
+        # تشغيل الملف بوضع unbuffered (-u) لالتقاط المخرجات فوراً
         proc = subprocess.Popen(
             [sys.executable, '-u', file_path],
             stdin=subprocess.PIPE,
@@ -275,5 +278,10 @@ def cancel_input(call):
         )
 
 if __name__ == '__main__':
-    logging.info("Bot is running...")
-    bot.infinity_polling()
+    logging.info("Bot is starting...")
+    # إزالة الـ Webhook القديم لضمان عمل getUpdates بانتظام دون تعارض
+    try:
+        bot.remove_webhook()
+    except Exception:
+        pass
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
