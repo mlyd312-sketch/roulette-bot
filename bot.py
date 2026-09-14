@@ -81,14 +81,13 @@ ADMIN_CHANNEL = '@FD_CQ'
 
 BASE_DIR = os.path.abspath(os.getcwd())
 UPLOADED_FILES_DIR = os.path.join(BASE_DIR, "uploaded_files")
-# جعل الحد الأقصى لحجم الملف مفتوحاً حتى 2GB (أقصى حد لتيليجرام)
-MAX_FILE_SIZE = 2048 * 1024 * 1024
+MAX_FILE_SIZE = 2048 * 1024 * 1024  # حجم بلا حدود (حتى 2GB)
 
 bot = telebot.TeleBot(BOT_TOKEN)
 executor = ThreadPoolExecutor(max_workers=10)
 lock = threading.Lock()
 
-protection_enabled = False  # إيقاف الحماية نهائياً ليعمل أي ملف بدون قيود
+protection_enabled = False
 bot_running = True
 
 os.makedirs(UPLOADED_FILES_DIR, exist_ok=True)
@@ -187,22 +186,23 @@ waiting_library = set()
 
 
 # ============================================================
-# كلمات مفتاحية لطلبات الإدخال (الرقم، الكود، التحقق)
+# كلمات مفتاحية لطلبات الإدخال الشاملة (رقم، كود، تحقق، باسورد)
 # ============================================================
 INPUT_KEYWORDS = [
     'أرسل رمز', 'ارسل رمز', 'أرسل كود', 'ارسل كود', 'أدخل رمز', 'أدخل كود',
     'ادخل الرمز', 'ادخل الكود', 'أدخل رقم الهواتف', 'أدخل رقم الهاتف',
     'enter the phone', 'enter phone', 'phone number', 'enter code',
     'enter the code', 'enter password', 'two-step', 'verification code',
-    'code:', 'otp:', 'number:', 'password:'
+    'code', 'otp', 'number', 'password', 'please enter', 'enter your',
+    'الرجاء إدخال', 'ادخل رقم', 'أدخل رقم', 'الرمز', 'الكود', 'رقم الهاتف'
 ]
 
 
 def looks_prompt(text):
-    if not text or len(text.strip()) < 3:
+    if not text or len(text.strip()) < 2:
         return False
     t = text.lower()
-    if 'connection' in t or 'traceback' in t or 'exception' in t:
+    if 'connection' in t and 'traceback' in t:
         return False
     return any(kw in t for kw in INPUT_KEYWORDS)
 
@@ -350,15 +350,12 @@ def monitor_output(chat_id, file_id, process):
                 continue
 
             buffer += decoded
-            flush = ('\n' in decoded)
+            # مراقبة الأسطر الجديدة أو علامات الاستفهام الخاصة بطلب الإدخال
+            flush = ('\n' in decoded or '?' in decoded or ':' in decoded)
 
-            if flush:
+            if flush and len(buffer.strip()) > 1:
                 line = buffer.strip()
-                buffer = ""
-
-                if not line or len(line) < 2:
-                    continue
-
+                # إذا كانت السطر طويلاً جداً أو يحتوي على مخرجات عادية، نتحقق إن كان طلب إدخال
                 if looks_prompt(line):
                     flush_batch()
                     pending_inputs[chat_id] = file_id
@@ -367,19 +364,24 @@ def monitor_output(chat_id, file_id, process):
                     try:
                         bot.send_message(
                             chat_id,
-                            f"📞 <b>الملف يطلب إدخال بيانات (رقم/كود):</b>\n\n"
+                            f"📞 <b>طلب من الملف (رقم / كود / تحقق):</b>\n\n"
                             f"<code>{eh(line[:500])}</code>\n\n"
-                            f"✍️ أرسل الرد في الشات الآن:",
+                            f"✍️ أرسل الرد (الرقم أو الكود) في الشات الآن:",
                             reply_markup=markup,
                             parse_mode='HTML'
                         )
                     except Exception as e:
                         logging.error(f"send prompt: {e}")
-                else:
-                    if shown_lines < MAX_SHOWN and not ('error' in line.lower()):
+                    buffer = ""
+                elif '\n' in decoded:
+                    buffer = ""
+                    if not ('traceback' in line.lower() or 'exception' in line.lower()) and shown_lines < MAX_SHOWN:
                         pending_batch.append(line)
                         shown_lines += 1
-                    if (time.time() - last_flush) > 3.0 or len(pending_batch) >= 10:
+                    else:
+                        pending_batch.append(line)
+                    
+                    if (time.time() - last_flush) > 2.0 or len(pending_batch) >= 8:
                         flush_batch()
 
     except Exception as e:
@@ -510,7 +512,7 @@ def show_menu(message):
 
 
 # ============================================================
-# معالج إدخال الأرقام والأكواد من المستخدم
+# معالج إدخال الرقم والكود وكلمة المرور من المستخدم
 # ============================================================
 @bot.message_handler(func=lambda m: (m.chat.id in pending_inputs and m.content_type == 'text' and not (m.text or '').startswith('/')))
 def handle_input(message):
@@ -536,13 +538,13 @@ def handle_input(message):
         proc.stdin.write((user_input + "\n").encode('utf-8'))
         proc.stdin.flush()
         try:
-            bot.reply_to(message, "✅ تم إرسال الإدخال بنجاح للملف.", parse_mode='HTML')
+            bot.reply_to(message, "✅ تم إرسال الرد بنجاح إلى الملف، تابع المخرجات.", parse_mode='HTML')
         except Exception:
             pass
         pending_inputs.pop(chat_id, None)
     except Exception as e:
         try:
-            bot.reply_to(message, f"❌ فشل إرسال الإدخال: {eh(str(e))}", parse_mode='HTML')
+            bot.reply_to(message, f"❌ فشل إرسال الرد: {eh(str(e))}", parse_mode='HTML')
         except Exception:
             pass
 
@@ -576,7 +578,7 @@ def handle_library_name(message):
 
 
 # ============================================================
-# استقبال الملفات (.py) بلا حدود وبدون قيود حماية
+# استقبال الملفات (.py) بلا حدود
 # ============================================================
 @bot.message_handler(content_types=['document'])
 def handle_doc(message):
