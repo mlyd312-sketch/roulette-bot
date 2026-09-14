@@ -10,8 +10,20 @@ import shutil
 import re
 import json
 import select
-from datetime import datetime
-from collections import defaultdict
+import asyncio
+import aiohttp
+import requests
+import urllib3
+import bs4
+from bs4 import BeautifulSoup
+import datetime
+from datetime import datetime, timedelta
+import random
+import string
+import math
+import hashlib
+import base64
+from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 
 # ======= إعدادات البوت ======= #
@@ -121,7 +133,7 @@ protection_level = "medium"
 MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024
 bot_running = True
 
-# ======= [جديد] متغيرات الإدخال التفاعلي ======= #
+# ======= متغيرات الإدخال التفاعلي ======= #
 process_stdin_pending = {}    # {chat_id: {'file_name':..., 'process':..., 'msg_id':...}}
 asked_prompts = set()         # {(chat_id, file_name)} التي تم سؤال المستخدم عنها
 input_collecting = {}         # {chat_id: {'file_name':..., 'process':...}} للإدخال المباشر
@@ -235,30 +247,26 @@ def scan_file_for_malicious_code(file_path, user_id):
     except Exception as e:
         return True, f"خطأ في الفحص: {e}"
 
-# ======= [جديد] كشف طلبات الإدخال ======= #
+# ======= كشف طلبات الإدخال ======= #
 def _is_prompt_text(text: str) -> bool:
-    """هل النص يبدو كطلب إدخال من المستخدم؟"""
     if not text or len(text.strip()) < 3:
         return False
     text_lower = text.lower()
     has_keyword = any(kw.lower() in text_lower for kw in PROMPT_KEYWORDS)
     if not has_keyword:
         return False
-    # آخر سطر عادةً هو الطلب
     last_line = text.strip().split('\n')[-1].strip()
     if len(last_line) < 3 or len(last_line) > 500:
         return False
     return True
 
 def _ask_user_for_input(chat_id, script_name, prompt_text, process):
-    """إرسال طلب الإدخال للمستخدم"""
     markup = types.InlineKeyboardMarkup()
     cancel_btn = btn("تخطي / إلغاء", callback_data=f'cancelinput_{chat_id}_{script_name}',
                      emoji_key='cross', style="danger")
     markup.add(cancel_btn)
 
     clean_prompt = prompt_text.strip()
-    # إذا كان النص طويلاً جداً، خذ آخر 300 حرف
     if len(clean_prompt) > 300:
         clean_prompt = clean_prompt[-300:]
 
@@ -282,14 +290,12 @@ def _ask_user_for_input(chat_id, script_name, prompt_text, process):
     }
 
 def _process_reader(process, chat_id, script_name):
-    """خيط يقرأ مخرجات الملف ويكتشف طلبات الإدخال تلقائياً"""
     fd = process.stdout.fileno()
     buffer = b""
 
     try:
         while True:
             if process.poll() is not None:
-                # محاولة قراءة ما تبقى
                 try:
                     while True:
                         r, _, _ = select.select([fd], [], [], 0.1)
@@ -322,7 +328,6 @@ def _process_reader(process, chat_id, script_name):
                 except Exception:
                     text = buffer.decode('latin-1', errors='replace')
 
-                # هل يبدو النص كطلب إدخال؟
                 if _is_prompt_text(text):
                     key = (chat_id, script_name)
                     if key not in asked_prompts:
@@ -331,13 +336,11 @@ def _process_reader(process, chat_id, script_name):
                         buffer = b""
                         continue
 
-                # تنظيف الـ buffer إذا كبر كثيراً
                 if len(buffer) > 1500:
                     buffer = buffer[-500:]
     except Exception as e:
         print(f"[reader-{script_name}] {e}")
     finally:
-        # تنظيف عند انتهاء العملية
         try:
             key = (chat_id, script_name)
             asked_prompts.discard(key)
@@ -370,7 +373,6 @@ def stop_bot(script_path, chat_id):
                     process.kill()
                     process.wait()
                 bot_scripts[chat_id]['processes'][script_name] = None
-        # تنظيف الحالات المرتبطة
         asked_prompts.discard((chat_id, script_name))
         if chat_id in process_stdin_pending and process_stdin_pending[chat_id].get('file_name') == script_name:
             del process_stdin_pending[chat_id]
@@ -392,7 +394,6 @@ def start_file(script_path, chat_id):
                 send_with_emoji(chat_id, f"الملف {script_name} يعمل بالفعل.", E['warning'])
                 return
 
-            # ⬇️ استخدام PIPE للإدخال والإخراج
             p = subprocess.Popen(
                 [sys.executable, "-u", script_path],
                 stdin=subprocess.PIPE,
@@ -404,7 +405,6 @@ def start_file(script_path, chat_id):
             bot_scripts[chat_id]['name'] = script_name
             bot_scripts[chat_id]['path'] = script_path
 
-            # ⬇️ بدء خيط المراقبة
             threading.Thread(
                 target=_process_reader,
                 args=(p, chat_id, script_name),
@@ -496,7 +496,7 @@ def check_expired_files():
 
 threading.Thread(target=check_expired_files, daemon=True).start()
 
-# ======= [جديد] Handler لإدخال المستخدم ======= #
+# ======= Handler لإدخال المستخدم ======= #
 @bot.message_handler(
     func=lambda m: m.chat.id in process_stdin_pending and m.content_type == 'text'
                   and not (m.text or '').startswith('/'),
@@ -524,11 +524,9 @@ def handle_process_input(message):
             del process_stdin_pending[chat_id]
             return
 
-        # إرسال الإجابة للملف (نضيف سطر جديد لإنهاء input)
         process.stdin.write((user_input + '\n').encode('utf-8'))
         process.stdin.flush()
 
-        # حذف الطلب + السماح بطلب إدخال آخر لاحقاً
         del process_stdin_pending[chat_id]
         asked_prompts.discard((chat_id, file_name))
 
@@ -1363,13 +1361,23 @@ def reject_user(call):
         bot.answer_callback_query(call.id, "❌ تم الرفض")
         bot.edit_message_text(f"❌ تم رفض {user_info['first_name']}", call.message.chat.id, call.message.message_id)
 
-# ======= التشغيل ======= #
+# ======= معالج Inline الحماية والأمان ======= #
+@bot.inline_handler(func=lambda query: True)
+def default_inline_query(inline_query):
+    try:
+        bot.answer_inline_query(inline_query.id, [], cache_time=1)
+    except Exception as e:
+        print(f"[Inline Error] {e}")
+
+# ======= التشغيل النهائي للسكريبت ======= #
 if __name__ == '__main__':
-    print("🤖 البوت يعمل...")
+    print("🤖 البوت يعمل بنجاح...")
     print(f"✅ المعتمدون: {len(approved_users)}")
     print(f"⏳ الطلبات: {len(pending_requests)}")
-    try:
-        bot.infinity_polling()
-    except Exception as e:
-        print(f"❌ خطأ: {e}")
-        time.sleep(5)
+    
+    while True:
+        try:
+            bot.infinity_polling(skip_pending=True, timeout=20, long_polling_timeout=10)
+        except Exception as e:
+            print(f"❌ حدث خطأ في الاتصال: {e}")
+            time.sleep(5)
