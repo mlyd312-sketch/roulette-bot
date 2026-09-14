@@ -4,3 +4,4 @@ yt-dlp
 imageio-ffmpeg
 pyrogram
 tgcrypto
+telethon
