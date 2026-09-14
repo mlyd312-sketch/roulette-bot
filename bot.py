@@ -150,7 +150,7 @@ INPUT_KEYWORDS = [
     '2fa', 'كلمة السر', 'كلمة سر', 'التحقق',
     'الهاتف', 'هاتف', 'input', 'enter',
     'token', 'session', 'api_id', 'api_hash', 'bot_token',
-    'user', 'username', 'name', 'id', 'password'
+    'user', 'username', 'name', 'id'
 ]
 
 PROMPT_END_CHARS = ('؟', '?', ':', '!', '؛')
@@ -250,7 +250,6 @@ def monitor_process_output(chat_id, file_id, process):
 
             buffer += decoded
 
-            # شرط الإرسال: سطر جديد، أو انتهى بعلامة استفهام ونحوه
             should_flush = False
 
             if '\n' in decoded:
@@ -267,7 +266,6 @@ def monitor_process_output(chat_id, file_id, process):
 
                 output_buffers[chat_id] = line
 
-                # إذا بدا كطلب إدخال
                 if _looks_like_prompt(line):
                     pending_inputs[chat_id] = file_id
 
@@ -296,7 +294,6 @@ def monitor_process_output(chat_id, file_id, process):
     except Exception as e:
         print(f"❌ خطأ في المراقبة [{chat_id}/{file_id}]: {e}")
     finally:
-        # إن كان هذا الملف ينتظر إدخالاً — أزله
         if pending_inputs.get(chat_id) == file_id:
             pending_inputs.pop(chat_id, None)
 
@@ -310,7 +307,6 @@ def stop_one_file(chat_id, file_id, delete=False):
     proc = info.get('process')
 
     if proc and proc.poll() is None:
-        # أغلق stdin أولاً
         try:
             proc.stdin.close()
         except Exception:
@@ -323,7 +319,6 @@ def stop_one_file(chat_id, file_id, delete=False):
             proc.kill()
             proc.wait()
 
-    # نظّف الإدخال المعلّق
     if pending_inputs.get(chat_id) == file_id:
         pending_inputs.pop(chat_id, None)
 
@@ -458,7 +453,6 @@ def handle_process_input(message):
         process.stdin.write((user_input + "\n").encode('utf-8'))
         process.stdin.flush()
 
-        # أخفِ القيمة الحساسة جزئياً في التأكيد
         if len(user_input) > 8:
             masked = user_input[:3] + "*" * (len(user_input) - 6) + user_input[-3:]
         else:
@@ -471,7 +465,6 @@ def handle_process_input(message):
             parse_mode='Markdown'
         )
 
-        # أزل الحالة — إن طلب الملف شيئاً آخر سيُعاد تفعيلها من المراقب
         pending_inputs.pop(chat_id, None)
 
     except Exception as e:
@@ -745,7 +738,7 @@ def check_speed(call):
     )
 
 
-# ========== الرفع والقائمة الرئيسية ==========
+# ========== الرفع ==========
 @bot.callback_query_handler(func=lambda call: call.data == 'upload')
 def upload_file_callback(call):
     if not is_approved_user(call.from_user.id):
@@ -989,7 +982,6 @@ def handle_file(message):
             bot.reply_to(message, "❌ فقط ملفات بايثون مسموحة")
             return
 
-        # مجلد خاص لكل مستخدم
         user_dir = os.path.join(uploaded_files_dir, str(user_id))
         os.makedirs(user_dir, exist_ok=True)
 
@@ -1386,17 +1378,31 @@ def broadcast_message(message):
         bot.reply_to(message, "❌ استخدم: /rck الرسالة")
 
 
-# ========== التشغيل ==========
+# ========== التشغيل مع حلقة إعادة التشغيل التلقائي ==========
 if __name__ == '__main__':
-    print("🤖 البوت يعمل...")
+    print("=" * 50)
+    print("🤖 Python Hosting Bot")
+    print("=" * 50)
     print(f"👨‍💻 المطور: {YOUR_USERNAME} ({ADMIN_ID})")
     print(f"📢 القناة: {ADMIN_CHANNEL}")
     print(f"✅ المستخدمون المعتمدون: {len(approved_users)}")
     print(f"⏳ طلبات الانتظار: {len(pending_requests)}")
     print(f"⚡ حالة البوت: {'يعمل' if bot_running else 'متوقف'}")
+    print("=" * 50)
 
-    try:
-        bot.infinity_polling(timeout=60, long_polling_timeout=60)
-    except Exception as e:
-        print(f"❌ خطأ: {e}")
-        time.sleep(5)
+    # حلقة إعادة التشغيل التلقائي — تمنع الموت عند حدوث خطأ
+    while True:
+        try:
+            print("🚀 Starting polling...")
+            bot.infinity_polling(
+                timeout=60,
+                long_polling_timeout=60,
+                skip_pending=True
+            )
+        except KeyboardInterrupt:
+            print("⏹️ تم إيقاف البوت يدوياً")
+            break
+        except Exception as e:
+            print(f"❌ خطأ في التشغيل: {e}")
+            print("🔄 إعادة التشغيل بعد 5 ثواني...")
+            time.sleep(5)
