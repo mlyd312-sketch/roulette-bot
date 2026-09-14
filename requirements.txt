@@ -1,2 +1,6 @@
 pyTelegramBotAPI
-flask
+python-telegram-bot
+yt-dlp
+imageio-ffmpeg
+pyrogram
+tgcrypto
