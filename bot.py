@@ -160,21 +160,44 @@ PROMPT_KEYWORDS = [
     'أرسل رمز', 'ارسل رمز', 'أرسل كود', 'ارسل كود', 'أرسل رقم', 'ارسل رقم',
     'أدخل رمز', 'أدخل كود', 'ادخل الرمز', 'ادخل الكود', 'أدخل رقم', 'ادخل رقم',
     'رقم الهاتف', 'الرجاء إدخال', 'رمز التحقق', 'كود التحقق', 'كلمة سر', 'كلمة المرور',
-    'التحقق بخطوتين', 'بخطوتين', 'الرمز', 'الكود', 'الهاتف', 'التحقق', 'ادخل', 'أدخل',
-    # إنجليزي
-    'enter the phone', 'enter phone', 'phone number', 'enter code', 'enter the code',
-    'enter password', 'two-step', '2fa', 'verification code', 'please enter',
-    'enter your', 'otp', 'code:', 'password:', 'number:', 'phone:', 'input:'
+    'التحقق بخطوتين', 'بخطوتين',
+    # إنجليزي (محدد - تجنب الكلمات العامة)
+    'enter the phone', 'enter phone', 'phone number',
+    'enter code', 'enter the code', 'enter the verification',
+    'enter password', 'enter your password',
+    'two-step', '2fa', 'verification code',
+    'please enter', 'enter your'
 ]
+
+# بصمات الأخطاء — تُفحص أولاً قبل طلبات الإدخال
+ERROR_SIGNATURES = [
+    'error', 'traceback', 'exception', 'failed', 'failure',
+    '429', 'too many requests', 'floodwait', 'flood wait',
+    'retry after', 'connectionerror', 'timeout',
+    'unauthorized', 'forbidden',
+    'nomodulefounderror', 'importerror', 'syntaxerror',
+    'raise ', 'stack trace'
+]
+
+
+def looks_like_error(text):
+    """هل النص رسالة خطأ؟"""
+    if not text:
+        return False
+    t = text.lower()
+    return any(sig in t for sig in ERROR_SIGNATURES)
+
 
 def looks_prompt(text):
     """يكتشف فقط الطلبات الحقيقية للإدخال (رقم/كود/تحقق)"""
     if not text or len(text.strip()) < 3:
         return False
-    t = text.lower()
-    # تجاهل الأخطاء
-    if 'traceback' in t or 'connection' in t:
+
+    # ⚠️ أولاً: إذا كان خطأ → ارفض (هذا يحل مشكلة Error code: 429)
+    if looks_like_error(text):
         return False
+
+    t = text.lower()
     return any(kw in t for kw in PROMPT_KEYWORDS)
 
 # ============================================================
@@ -263,7 +286,7 @@ def start_file(script_path, chat_id, file_id):
                 pass
 
 # ============================================================
-# مراقبة المخرجات (تستخدم Queue لمنع التعليق عند input بدون \n)
+# مراقبة المخرجات (تستخدم Queue لمنع التعليق)
 # ============================================================
 def enqueue_output(out, q):
     """يقرأ الحروف من stdout ويضعها في Queue"""
@@ -286,22 +309,34 @@ def monitor_output(chat_id, file_id, process):
     last_prompt_sent[file_id] = ("", 0)
     last_error_sent[file_id]  = ("", 0)
 
+    def _normalize(text):
+        """إزالة الأرقام والمسافات لمقارنة ذكية (retry after 27 = retry after 25)"""
+        t = re.sub(r'\d+', '#', text)
+        t = re.sub(r'\s+', ' ', t)
+        return t.strip()[:200]
+
     def _send_prompt(line):
-        """إرسال طلب إدخال مرة واحدة فقط خلال 30 ثانية"""
+        """إرسال طلب إدخال مرة واحدة فقط خلال 60 ثانية (بناءً على نص مُنَظَّف)"""
         prev_text, prev_time = last_prompt_sent.get(file_id, ("", 0))
         now = time.time()
-        if line == prev_text and (now - prev_time) < 30:
+        normalized = _normalize(line)
+
+        # منع التكرار خلال 60 ثانية لنفس النص المُنَظَّف
+        if normalized == prev_text and (now - prev_time) < 60:
             return
-        last_prompt_sent[file_id] = (line, now)
+
+        last_prompt_sent[file_id] = (normalized, now)
         pending_inputs[chat_id] = file_id
+
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton("❌ إلغاء الطلب", callback_data=f'ci_{file_id}'))
+
         try:
             bot.send_message(
                 chat_id,
-                f"📞 <b>الملف يطلب إدخال (رقم / كود / تحقق):</b>\n\n"
+                f"📞 <b>الملف يطلب إدخال:</b>\n\n"
                 f"<code>{eh(line[:400])}</code>\n\n"
-                f"✍️ <b>أرسل الرقم أو الكود الآن في الشات:</b>",
+                f"✍️ <b>أرسل الرقم أو الكود الآن:</b>",
                 reply_markup=markup,
                 parse_mode='HTML'
             )
@@ -309,12 +344,15 @@ def monitor_output(chat_id, file_id, process):
             logging.error(f"send prompt: {e}")
 
     def _send_error(line):
-        """إرسال الخطأ مرة واحدة فقط خلال 60 ثانية"""
+        """إرسال الخطأ مرة واحدة فقط خلال 120 ثانية"""
         prev_text, prev_time = last_error_sent.get(file_id, ("", 0))
         now = time.time()
-        if line == prev_text and (now - prev_time) < 60:
+        normalized = _normalize(line)
+
+        if normalized == prev_text and (now - prev_time) < 120:
             return
-        last_error_sent[file_id] = (line, now)
+
+        last_error_sent[file_id] = (normalized, now)
         try:
             bot.send_message(
                 chat_id,
@@ -328,7 +366,6 @@ def monitor_output(chat_id, file_id, process):
         nonlocal buffer
         if not buffer.strip():
             return
-        # إذا لم يكن إجبارياً، ننتظر سطر جديد أو طول كبير
         if not force and '\n' not in buffer and len(buffer) < 150:
             return
 
@@ -340,14 +377,11 @@ def monitor_output(chat_id, file_id, process):
         if set(line) <= {'.', '!', '-', '_', ' ', '*', '=', '~'}:
             return
 
-        # 1) طلب إدخال حقيقي
-        if looks_prompt(line):
-            _send_prompt(line)
-        # 2) خطأ حقيقي
-        elif ('traceback' in line.lower()
-              or 'error' in line.lower()
-              or 'exception' in line.lower()):
+        # ⚠️ الترتيب مهم: الأخطاء تُفحص أولاً
+        if looks_like_error(line):
             _send_error(line)
+        elif looks_prompt(line):
+            _send_prompt(line)
 
     try:
         while True:
@@ -368,7 +402,7 @@ def monitor_output(chat_id, file_id, process):
             except queue.Empty:
                 # انتهت المهلة (لا يوجد إخراج جديد)
                 # إذا كان هناك شيء في البافر، قد يكون طلب إدخال بدون سطر جديد
-                if buffer.strip() and looks_prompt(buffer):
+                if buffer.strip() and looks_prompt(buffer) and not looks_like_error(buffer):
                     process_buffer(force=True)
 
                 # التحقق مما إذا كان الملف قد انتهى
