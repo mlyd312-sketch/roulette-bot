@@ -18,6 +18,14 @@ from concurrent.futures import ThreadPoolExecutor
 import telebot
 from telebot import types
 
+# ============================================================
+# ✅ إعدادات Timeouts (حل مشكلة ReadTimeout على Railway)
+# ============================================================
+telebot.apihelper.CONNECT_TIMEOUT = 90
+telebot.apihelper.READ_TIMEOUT = 90
+telebot.apihelper.RETRY_ON_ERROR = True
+telebot.apihelper.MAX_RETRIES = 5
+
 # ضبط إعدادات ترميز النظام
 try:
     if hasattr(sys.stdout, 'reconfigure'):
@@ -58,9 +66,13 @@ ADMIN_CHANNEL = '@FD_CQ'
 BASE_DIR = os.path.abspath(os.getcwd())
 UPLOADED_FILES_DIR = os.path.join(BASE_DIR, "uploaded_files")
 
+# ✅ حد حجم الملف (5MB)
+MAX_FILE_SIZE = 5 * 1024 * 1024
+
 bot = telebot.TeleBot(BOT_TOKEN)
 executor = ThreadPoolExecutor(max_workers=10)
 lock = threading.Lock()
+db_lock = threading.Lock()
 
 protection_enabled = False
 bot_running = True
@@ -71,20 +83,21 @@ os.makedirs(UPLOADED_FILES_DIR, exist_ok=True)
 # قاعدة البيانات
 # ============================================================
 def init_db():
-    with sqlite3.connect('bot_data.db') as conn:
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS approved_users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            approved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS pending_requests (
-            user_id INTEGER PRIMARY KEY,
-            first_name TEXT,
-            username TEXT,
-            requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        c.execute('INSERT OR IGNORE INTO approved_users (user_id, username) VALUES (?, ?)',
-                  (ADMIN_ID, 'ADMIN'))
-        conn.commit()
+    with db_lock:
+        with sqlite3.connect('bot_data.db') as conn:
+            c = conn.cursor()
+            c.execute('''CREATE TABLE IF NOT EXISTS approved_users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                approved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS pending_requests (
+                user_id INTEGER PRIMARY KEY,
+                first_name TEXT,
+                username TEXT,
+                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            c.execute('INSERT OR IGNORE INTO approved_users (user_id, username) VALUES (?, ?)',
+                      (ADMIN_ID, 'ADMIN'))
+            conn.commit()
 
 init_db()
 
@@ -94,52 +107,59 @@ def is_admin(uid):
 def is_approved(uid):
     if is_admin(uid):
         return True
-    with sqlite3.connect('bot_data.db') as conn:
-        c = conn.cursor()
-        c.execute('SELECT user_id FROM approved_users WHERE user_id = ?', (uid,))
-        return c.fetchone() is not None
+    with db_lock:
+        with sqlite3.connect('bot_data.db') as conn:
+            c = conn.cursor()
+            c.execute('SELECT user_id FROM approved_users WHERE user_id = ?', (uid,))
+            return c.fetchone() is not None
 
 def is_pending(uid):
-    with sqlite3.connect('bot_data.db') as conn:
-        c = conn.cursor()
-        c.execute('SELECT user_id FROM pending_requests WHERE user_id = ?', (uid,))
-        return c.fetchone() is not None
+    with db_lock:
+        with sqlite3.connect('bot_data.db') as conn:
+            c = conn.cursor()
+            c.execute('SELECT user_id FROM pending_requests WHERE user_id = ?', (uid,))
+            return c.fetchone() is not None
 
 def add_approved(uid, username):
-    with sqlite3.connect('bot_data.db') as conn:
-        c = conn.cursor()
-        c.execute('INSERT OR REPLACE INTO approved_users (user_id, username) VALUES (?, ?)',
-                  (uid, username))
-        c.execute('DELETE FROM pending_requests WHERE user_id = ?', (uid,))
-        conn.commit()
+    with db_lock:
+        with sqlite3.connect('bot_data.db') as conn:
+            c = conn.cursor()
+            c.execute('INSERT OR REPLACE INTO approved_users (user_id, username) VALUES (?, ?)',
+                      (uid, username))
+            c.execute('DELETE FROM pending_requests WHERE user_id = ?', (uid,))
+            conn.commit()
 
 def add_pending(uid, fname, username):
-    with sqlite3.connect('bot_data.db') as conn:
-        c = conn.cursor()
-        c.execute('INSERT OR REPLACE INTO pending_requests (user_id, first_name, username) VALUES (?, ?, ?)',
-                  (uid, fname, username))
-        conn.commit()
+    with db_lock:
+        with sqlite3.connect('bot_data.db') as conn:
+            c = conn.cursor()
+            c.execute('INSERT OR REPLACE INTO pending_requests (user_id, first_name, username) VALUES (?, ?, ?)',
+                      (uid, fname, username))
+            conn.commit()
 
 def remove_pending(uid):
-    with sqlite3.connect('bot_data.db') as conn:
-        c = conn.cursor()
-        c.execute('DELETE FROM pending_requests WHERE user_id = ?', (uid,))
-        conn.commit()
+    with db_lock:
+        with sqlite3.connect('bot_data.db') as conn:
+            c = conn.cursor()
+            c.execute('DELETE FROM pending_requests WHERE user_id = ?', (uid,))
+            conn.commit()
 
 def get_pending():
-    with sqlite3.connect('bot_data.db') as conn:
-        c = conn.cursor()
-        c.execute('SELECT user_id, first_name, username FROM pending_requests')
-        return c.fetchall()
+    with db_lock:
+        with sqlite3.connect('bot_data.db') as conn:
+            c = conn.cursor()
+            c.execute('SELECT user_id, first_name, username FROM pending_requests')
+            return c.fetchall()
 
 def get_stats():
-    with sqlite3.connect('bot_data.db') as conn:
-        c = conn.cursor()
-        c.execute('SELECT COUNT(*) FROM approved_users')
-        a = c.fetchone()[0]
-        c.execute('SELECT COUNT(*) FROM pending_requests')
-        p = c.fetchone()[0]
-        return a, p
+    with db_lock:
+        with sqlite3.connect('bot_data.db') as conn:
+            c = conn.cursor()
+            c.execute('SELECT COUNT(*) FROM approved_users')
+            a = c.fetchone()[0]
+            c.execute('SELECT COUNT(*) FROM pending_requests')
+            p = c.fetchone()[0]
+            return a, p
 
 # ============================================================
 # الحالة العامة
@@ -148,12 +168,10 @@ active_processes = {}
 pending_inputs = {}
 waiting_library = set()
 
-# تتبع آخر رسالة مرسلة لكل ملف (لمنع التكرار)
 last_prompt_sent = {}
-last_error_sent  = {}
 
 # ============================================================
-# كلمات مفتاحية فقط لطلبات الإدخال الحقيقية (رقم/كود/تحقق/2FA)
+# كلمات مفتاحية فقط لطلبات الإدخال الحقيقية
 # ============================================================
 PROMPT_KEYWORDS = [
     # عربي
@@ -161,7 +179,7 @@ PROMPT_KEYWORDS = [
     'أدخل رمز', 'أدخل كود', 'ادخل الرمز', 'ادخل الكود', 'أدخل رقم', 'ادخل رقم',
     'رقم الهاتف', 'الرجاء إدخال', 'رمز التحقق', 'كود التحقق', 'كلمة سر', 'كلمة المرور',
     'التحقق بخطوتين', 'بخطوتين',
-    # إنجليزي (محدد - تجنب الكلمات العامة)
+    # إنجليزي
     'enter the phone', 'enter phone', 'phone number',
     'enter code', 'enter the code', 'enter the verification',
     'enter password', 'enter your password',
@@ -169,34 +187,11 @@ PROMPT_KEYWORDS = [
     'please enter', 'enter your'
 ]
 
-# بصمات الأخطاء — تُفحص أولاً قبل طلبات الإدخال
-ERROR_SIGNATURES = [
-    'error', 'traceback', 'exception', 'failed', 'failure',
-    '429', 'too many requests', 'floodwait', 'flood wait',
-    'retry after', 'connectionerror', 'timeout',
-    'unauthorized', 'forbidden',
-    'nomodulefounderror', 'importerror', 'syntaxerror',
-    'raise ', 'stack trace'
-]
-
-
-def looks_like_error(text):
-    """هل النص رسالة خطأ؟"""
-    if not text:
-        return False
-    t = text.lower()
-    return any(sig in t for sig in ERROR_SIGNATURES)
-
 
 def looks_prompt(text):
-    """يكتشف فقط الطلبات الحقيقية للإدخال (رقم/كود/تحقق)"""
+    """يكتشف فقط طلبات الإدخال الحقيقية (رقم/كود/تحقق)"""
     if not text or len(text.strip()) < 3:
         return False
-
-    # ⚠️ أولاً: إذا كان خطأ → ارفض (هذا يحل مشكلة Error code: 429)
-    if looks_like_error(text):
-        return False
-
     t = text.lower()
     return any(kw in t for kw in PROMPT_KEYWORDS)
 
@@ -255,7 +250,6 @@ def start_file(script_path, chat_id, file_id):
             info['process'] = p
             info['started_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # أزرار التحكم
             markup = types.InlineKeyboardMarkup(row_width=3)
             markup.add(
                 types.InlineKeyboardButton("🛑 إيقاف", callback_data=f'sf_{file_id}'),
@@ -286,10 +280,9 @@ def start_file(script_path, chat_id, file_id):
                 pass
 
 # ============================================================
-# مراقبة المخرجات (تستخدم Queue لمنع التعليق)
+# مراقبة المخرجات
 # ============================================================
 def enqueue_output(out, q):
-    """يقرأ الحروف من stdout ويضعها في Queue"""
     while True:
         try:
             ch = out.read(1)
@@ -307,21 +300,18 @@ def monitor_output(chat_id, file_id, process):
 
     buffer = ""
     last_prompt_sent[file_id] = ("", 0)
-    last_error_sent[file_id]  = ("", 0)
 
     def _normalize(text):
-        """إزالة الأرقام والمسافات لمقارنة ذكية (retry after 27 = retry after 25)"""
         t = re.sub(r'\d+', '#', text)
         t = re.sub(r'\s+', ' ', t)
         return t.strip()[:200]
 
     def _send_prompt(line):
-        """إرسال طلب إدخال مرة واحدة فقط خلال 60 ثانية (بناءً على نص مُنَظَّف)"""
+        """إرسال طلب إدخال مرة واحدة فقط خلال 60 ثانية"""
         prev_text, prev_time = last_prompt_sent.get(file_id, ("", 0))
         now = time.time()
         normalized = _normalize(line)
 
-        # منع التكرار خلال 60 ثانية لنفس النص المُنَظَّف
         if normalized == prev_text and (now - prev_time) < 60:
             return
 
@@ -343,25 +333,6 @@ def monitor_output(chat_id, file_id, process):
         except Exception as e:
             logging.error(f"send prompt: {e}")
 
-    def _send_error(line):
-        """إرسال الخطأ مرة واحدة فقط خلال 120 ثانية"""
-        prev_text, prev_time = last_error_sent.get(file_id, ("", 0))
-        now = time.time()
-        normalized = _normalize(line)
-
-        if normalized == prev_text and (now - prev_time) < 120:
-            return
-
-        last_error_sent[file_id] = (normalized, now)
-        try:
-            bot.send_message(
-                chat_id,
-                f"⚠️ <b>خطأ في الملف:</b>\n<pre>{eh(line[:800])}</pre>",
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logging.error(f"send error: {e}")
-
     def process_buffer(force=False):
         nonlocal buffer
         if not buffer.strip():
@@ -377,16 +348,13 @@ def monitor_output(chat_id, file_id, process):
         if set(line) <= {'.', '!', '-', '_', ' ', '*', '=', '~'}:
             return
 
-        # ⚠️ الترتيب مهم: الأخطاء تُفحص أولاً
-        if looks_like_error(line):
-            _send_error(line)
-        elif looks_prompt(line):
+        # ✅ فقط طلبات الإدخال — الأخطاء تُتجاهل تماماً
+        if looks_prompt(line):
             _send_prompt(line)
 
     try:
         while True:
             try:
-                # محاولة القراءة من الـ Queue مع مهلة ثانية واحدة
                 ch = q.get(timeout=1.0)
                 try:
                     decoded = ch.decode('utf-8', errors='ignore')
@@ -400,14 +368,10 @@ def monitor_output(chat_id, file_id, process):
                     process_buffer()
 
             except queue.Empty:
-                # انتهت المهلة (لا يوجد إخراج جديد)
-                # إذا كان هناك شيء في البافر، قد يكون طلب إدخال بدون سطر جديد
-                if buffer.strip() and looks_prompt(buffer) and not looks_like_error(buffer):
+                if buffer.strip() and looks_prompt(buffer):
                     process_buffer(force=True)
 
-                # التحقق مما إذا كان الملف قد انتهى
                 if process.poll() is not None:
-                    # تفريغ ما تبقى في الـ Queue
                     while not q.empty():
                         try:
                             ch = q.get_nowait()
@@ -444,14 +408,14 @@ def monitor_output(chat_id, file_id, process):
         if pending_inputs.get(chat_id) == file_id:
             pending_inputs.pop(chat_id, None)
         last_prompt_sent.pop(file_id, None)
-        last_error_sent.pop(file_id, None)
 
 def stop_one(chat_id, file_id, delete=False):
-    if chat_id not in active_processes or file_id not in active_processes[chat_id]:
-        return False
+    with lock:
+        if chat_id not in active_processes or file_id not in active_processes[chat_id]:
+            return False
 
-    info = active_processes[chat_id][file_id]
-    proc = info.get('process')
+        info = active_processes[chat_id][file_id]
+        proc = info.get('process')
 
     if proc and proc.poll() is None:
         try:
@@ -472,14 +436,14 @@ def stop_one(chat_id, file_id, delete=False):
         pending_inputs.pop(chat_id, None)
 
     last_prompt_sent.pop(file_id, None)
-    last_error_sent.pop(file_id, None)
 
     if delete and info.get('path') and os.path.exists(info['path']):
         try:
             os.remove(info['path'])
         except Exception:
             pass
-        active_processes[chat_id].pop(file_id, None)
+        with lock:
+            active_processes[chat_id].pop(file_id, None)
 
     return True
 
@@ -568,6 +532,8 @@ def show_menu(message):
 
 @bot.message_handler(func=lambda m: (m.chat.id in pending_inputs and m.content_type == 'text' and not (m.text or '').startswith('/')))
 def handle_input(message):
+    if not bot_running:
+        return
     chat_id = message.chat.id
     file_id = pending_inputs.get(chat_id)
     if not file_id:
@@ -593,7 +559,6 @@ def handle_input(message):
         proc.stdin.write((user_input + "\n").encode('utf-8'))
         proc.stdin.flush()
 
-        # نمسح الطلب الحالي ونسمح بطلب جديد فوراً
         pending_inputs.pop(chat_id, None)
         last_prompt_sent.pop(file_id, None)
 
@@ -609,6 +574,8 @@ def handle_input(message):
 
 @bot.message_handler(func=lambda m: m.chat.id in waiting_library and m.content_type == 'text')
 def handle_library_name(message):
+    if not bot_running:
+        return
     chat_id = message.chat.id
     waiting_library.discard(chat_id)
     lib_name = (message.text or '').strip()
@@ -666,6 +633,13 @@ def handle_doc(message):
                 pass
             return
 
+        if doc.file_size and doc.file_size > MAX_FILE_SIZE:
+            try:
+                bot.reply_to(message, f"❌ حجم الملف كبير جداً. الحد الأقصى: 5MB")
+            except Exception:
+                pass
+            return
+
         file_info = bot.get_file(doc.file_id)
         downloaded = bot.download_file(file_info.file_path)
 
@@ -677,17 +651,18 @@ def handle_doc(message):
         with open(save_path, 'wb') as f:
             f.write(downloaded)
 
-        if chat_id not in active_processes:
-            active_processes[chat_id] = {}
+        with lock:
+            if chat_id not in active_processes:
+                active_processes[chat_id] = {}
 
-        active_processes[chat_id][file_id] = {
-            'name': file_name,
-            'path': save_path,
-            'process': None,
-            'started_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        }
+            active_processes[chat_id][file_id] = {
+                'name': file_name,
+                'path': save_path,
+                'process': None,
+                'started_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            total = len(active_processes[chat_id])
 
-        total = len(active_processes[chat_id])
         start_file(save_path, chat_id, file_id)
 
         try:
@@ -993,9 +968,29 @@ if __name__ == '__main__':
     logging.info("🤖 Bot starting...")
     logging.info("=" * 55)
 
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        logging.info("✅ Webhook removed")
+    except Exception as e:
+        logging.warning(f"⚠️ remove_webhook: {e}")
+
     while True:
         try:
-            bot.polling(none_stop=True, interval=1, timeout=60)
+            bot.polling(
+                none_stop=True,
+                interval=0,
+                timeout=90,
+                long_polling_timeout=90,
+            )
         except Exception as err:
-            logging.error(f"Polling error: {err}")
-            time.sleep(3)
+            err_str = str(err)
+            logging.error(f"Polling error: {err_str}")
+
+            if '429' in err_str or 'flood' in err_str.lower() or 'retry after' in err_str.lower():
+                match = re.search(r'(\d+)', err_str)
+                wait = int(match.group(1)) if match else 30
+                logging.warning(f"⏳ FloodWait: {wait}s")
+                time.sleep(wait + 5)
+            else:
+                time.sleep(5)
