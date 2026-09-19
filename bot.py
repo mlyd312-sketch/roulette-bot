@@ -3,7 +3,6 @@ import os
 import re
 import time
 import uuid
-import shutil
 import sqlite3
 import logging
 import signal
@@ -18,16 +17,21 @@ import telebot
 from telebot import types
 
 # ============================================================
-# Logging
+# ✅ Logging هادئ — بدون إزعاج
 # ============================================================
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,   # ← فقط WARNING وما فوق
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('bot.log', encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
+
+# ✅ نقفل loggings مزعجة
+for name in ['telebot', 'urllib3', 'requests', 'telegram']:
+    logging.getLogger(name).setLevel(logging.CRITICAL)
+
 
 # ============================================================
 # الإعدادات
@@ -40,7 +44,6 @@ ADMIN_CHANNEL = '@FD_CQ'
 UPLOADED_FILES_DIR = "uploaded_files"
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
-# ✅ threaded=True + num_threads للأداء
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=10)
 executor = ThreadPoolExecutor(max_workers=10)
 lock = threading.Lock()
@@ -51,7 +54,75 @@ bot_running = True
 os.makedirs(UPLOADED_FILES_DIR, exist_ok=True)
 
 # ============================================================
-# قاموس الإيموجيات المميزة
+# ✅ تثبيت تلقائي للمكتبات المطلوبة (Pyrogram + Telethon وغيرها)
+# ============================================================
+REQUIRED_PACKAGES = [
+    # ✅ Telegram Libraries
+    ("pyrogram", "pyrogram"),
+    ("tgcrypto", "tgcrypto"),
+    ("Telethon", "telethon"),
+    ("cryptg", "cryptg"),
+    ("pyTelegramBotAPI", "telebot"),
+    ("aiogram", "aiogram"),
+    # ✅ HTTP/Network
+    ("requests", "requests"),
+    ("aiohttp", "aiohttp"),
+    ("httpx", "httpx"),
+    # ✅ Parsing
+    ("beautifulsoup4", "bs4"),
+    ("lxml", "lxml"),
+    ("chardet", "chardet"),
+    # ✅ Images
+    ("Pillow", "PIL"),
+    ("qrcode", "qrcode"),
+    # ✅ Data
+    ("numpy", "numpy"),
+    ("pandas", "pandas"),
+    # ✅ Crypto
+    ("cryptography", "cryptography"),
+    ("pyaes", "pyaes"),
+    ("rsa", "rsa"),
+    # ✅ Misc
+    ("python-dotenv", "dotenv"),
+    ("psutil", "psutil"),
+    ("colorama", "colorama"),
+]
+
+
+def auto_install_packages():
+    """✅ يثبّت المكتبات الناقصة بصمت"""
+    import importlib
+    missing = []
+    for pip_name, import_name in REQUIRED_PACKAGES:
+        try:
+            importlib.import_module(import_name)
+        except ImportError:
+            missing.append(pip_name)
+        except:
+            pass
+
+    if not missing:
+        print("✅ كل المكتبات موجودة")
+        return
+
+    print(f"📦 جاري تثبيت {len(missing)} مكتبة...")
+    for pip_name in missing:
+        try:
+            r = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--quiet",
+                 "--no-cache-dir", "--disable-pip-version-check", pip_name],
+                capture_output=True, text=True, timeout=300
+            )
+            if r.returncode == 0:
+                print(f"  ✅ {pip_name}")
+            else:
+                print(f"  ⚠️ {pip_name}: فشل")
+        except:
+            print(f"  ⚠️ {pip_name}: خطأ")
+
+
+# ============================================================
+# إيموجيات
 # ============================================================
 E = {
     'fire': '5424972470023104089',
@@ -97,24 +168,21 @@ def eh(text):
 def safe_send(chat_id, text, **kwargs):
     try:
         return bot.send_message(chat_id, text, **kwargs)
-    except Exception as e:
-        logging.error(f"send error [{chat_id}]: {e}")
+    except:
         return None
 
 
 def safe_edit(chat_id, message_id, text, **kwargs):
     try:
         return bot.edit_message_text(text, chat_id, message_id, **kwargs)
-    except Exception as e:
-        logging.error(f"edit error: {e}")
+    except:
         return None
 
 
 def safe_answer(call_id, text=None, **kwargs):
     try:
         return bot.answer_callback_query(call_id, text, **kwargs)
-    except Exception as e:
-        logging.error(f"answer error: {e}")
+    except:
         return None
 
 
@@ -225,12 +293,10 @@ def get_stats():
 # ============================================================
 # متغيرات عامة
 # ============================================================
-# {chat_id: {file_id: {name, path, process, started_at}}}
 active_processes = {}
 pending_inputs = {}
 waiting_library = set()
 last_prompt_sent = {}
-last_error_sent = {}
 
 
 # ============================================================
@@ -241,8 +307,7 @@ INPUT_KEYWORDS = [
     'otp', 'phone', 'code', 'password', 'pass', '2fa',
     'كلمة السر', 'كلمة سر', 'التحقق', 'الهاتف', 'هاتف',
     'input', 'enter', 'token', 'session', 'api_id', 'api_hash',
-    'bot_token', 'user', 'username', 'auth', 'key', 'verify',
-    'number', 'account', 'login', 'sign', 'pin', 'secret'
+    'bot_token', 'auth', 'key', 'verify', 'login', 'sign', 'pin'
 ]
 PROMPT_END = ('؟', '?', ':', '!', '؛', '،')
 
@@ -254,16 +319,56 @@ def looks_prompt(text):
     return any(kw.lower() in t for kw in INPUT_KEYWORDS)
 
 
-def looks_like_error(text):
+# ============================================================
+# ✅ دالة خطأ صارمة — فقط الأخطاء الحقيقية
+# ============================================================
+REAL_ERRORS = [
+    'traceback (most recent call last)',
+    'syntaxerror',
+    'indentationerror',
+    'modulenotfounderror',
+    'importerror',
+    'nameerror:',
+    'typeerror:',
+    'valueerror:',
+    'keyerror:',
+    'attributeerror:',
+    'filenotfounderror',
+    'permissionerror',
+    'runtimeerror',
+    'zerodivisionerror',
+]
+
+# ❌ كلمات نتجاهلها (ليست أخطاء حقيقية)
+IGNORE_WORDS = [
+    'rate limit', 'floodwait', 'flood wait', 'retry after',
+    'warning', 'warn', 'deprecat', 'futurewarning',
+    'userwarning', 'info:', 'debug:',
+    '429', 'too many requests',
+    'connection reset', 'connection error',
+    'persistent timestamp',
+    'timeout error', 'read timeout',
+]
+
+
+def is_real_error(text):
+    """✅ فقط الأخطاء الحقيقية اللي تستاهل الإرسال"""
     if not text:
         return False
+
     t = text.lower()
-    errs = ['error', 'traceback', 'exception', 'failed',
-            '429', 'too many', 'floodwait', 'flood wait',
-            'retry after', 'connectionerror', 'timeout',
-            'unauthorized', 'forbidden', 'importerror',
-            'syntaxerror', 'raise ']
-    return any(e in t for e in errs)
+
+    # تجاهل الكلمات الممنوعة
+    for w in IGNORE_WORDS:
+        if w in t:
+            return False
+
+    # ابحث عن خطأ حقيقي
+    for err in REAL_ERRORS:
+        if err in t:
+            return True
+
+    return False
 
 
 # ============================================================
@@ -292,8 +397,7 @@ def start_file(script_path, chat_id, file_id):
             return
 
         if not os.path.exists(script_path):
-            safe_send(chat_id, f"❌ الملف غير موجود:\n<code>{eh(script_path)}</code>",
-                      parse_mode='HTML')
+            safe_send(chat_id, f"❌ الملف غير موجود.")
             return
 
         try:
@@ -301,8 +405,8 @@ def start_file(script_path, chat_id, file_id):
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
             env['PYTHONIOENCODING'] = 'utf-8'
+            env['PYTHONDONTWRITEBYTECODE'] = '1'
 
-            # ✅ نستخدم start_new_session=True لعزل العمليات
             p = subprocess.Popen(
                 [sys.executable, "-u", script_path],
                 cwd=work_dir,
@@ -333,7 +437,7 @@ def start_file(script_path, chat_id, file_id):
                 f"📁 <code>{eh(info['name'])}</code>\n"
                 f"🆔 <code>{file_id}</code>\n"
                 f"PID: <code>{p.pid}</code>\n\n"
-                f"⚡ جارٍ مراقبة الإخراج والمدخلات...",
+                f"⚡ جارٍ مراقبة الإخراج...",
                 reply_markup=markup,
                 parse_mode='HTML'
             )
@@ -346,29 +450,29 @@ def start_file(script_path, chat_id, file_id):
             t.start()
 
         except Exception as e:
-            logging.error(f"start_file error: {e}")
             safe_send(chat_id, f"❌ فشل: {eh(str(e))}", parse_mode='HTML')
 
 
 def monitor_output(chat_id, file_id, process):
+    """✅ مراقبة هادئة — فقط الأخطاء الحقيقية وطلبات الإدخال"""
     buffer = ""
-    shown_lines = 0
-    MAX_SHOWN = 50
-    pending_batch = []
-    last_flush = time.time()
+    error_batch = []
+    last_error_flush = time.time()
+    last_prompt_sent[file_id] = ("", 0)
 
-    def flush_batch():
-        nonlocal pending_batch, last_flush
-        if not pending_batch:
+    def flush_errors():
+        nonlocal error_batch, last_error_flush
+        if not error_batch:
             return
-        text = "\n".join(pending_batch[:40])
-        pending_batch = []
+        text = "\n".join(error_batch[:5])
+        error_batch = []
         try:
-            safe_send(chat_id, f"📄 <b>إخراج الملف:</b>\n<pre>{eh(text[:3500])}</pre>",
+            safe_send(chat_id,
+                      f"⚠️ <b>خطأ في الملف:</b>\n<pre>{eh(text[:1500])}</pre>",
                       parse_mode='HTML')
         except:
             pass
-        last_flush = time.time()
+        last_error_flush = time.time()
 
     try:
         while True:
@@ -379,21 +483,19 @@ def monitor_output(chat_id, file_id, process):
 
             if not ch:
                 if process.poll() is not None:
+                    # ✅ الملف انتهى
                     remaining = buffer.strip()
-                    if remaining:
-                        pending_batch.append(remaining)
-                    flush_batch()
+                    if remaining and is_real_error(remaining):
+                        error_batch.append(remaining)
+                    flush_errors()
 
                     exit_code = process.poll()
                     icon = "✅" if exit_code == 0 else "❌"
                     txt = "انتهى بنجاح" if exit_code == 0 else f"توقف بكود: {exit_code}"
                     safe_send(chat_id,
-                              f"{icon} <b>الملف {txt}</b>\n🆔 <code>{file_id}</code>",
+                              f"{icon} <b>{txt}</b>\n🆔 <code>{file_id}</code>",
                               parse_mode='HTML')
                     break
-
-                if pending_batch and (time.time() - last_flush) > 1.5:
-                    flush_batch()
                 time.sleep(0.03)
                 continue
 
@@ -403,53 +505,64 @@ def monitor_output(chat_id, file_id, process):
                 continue
 
             buffer += decoded
-            flush = ('\n' in decoded) or (decoded in PROMPT_END and len(buffer.strip()) >= 4)
 
-            if flush:
-                line = buffer.strip()
-                buffer = ""
+            # ✅ معالجة سطر
+            flush = False
+            if '\n' in decoded:
+                flush = True
+            elif decoded in PROMPT_END and len(buffer.strip()) >= 4:
+                flush = True
 
-                if not line or len(line) < 1:
-                    continue
+            if not flush:
+                continue
 
-                if looks_like_error(line):
-                    prev_text, prev_time = last_error_sent.get(file_id, ("", 0))
-                    now = time.time()
-                    if line != prev_text or (now - prev_time) > 120:
-                        last_error_sent[file_id] = (line, now)
-                        safe_send(chat_id,
-                                  f"⚠️ <b>خطأ في الملف:</b>\n<pre>{eh(line[:800])}</pre>",
-                                  parse_mode='HTML')
-                elif looks_prompt(line):
-                    prev_text, prev_time = last_prompt_sent.get(file_id, ("", 0))
-                    now = time.time()
-                    if line != prev_text or (now - prev_time) > 30:
-                        last_prompt_sent[file_id] = (line, now)
-                        pending_inputs[chat_id] = file_id
+            line = buffer.strip()
+            buffer = ""
 
-                        markup = types.InlineKeyboardMarkup()
-                        markup.add(types.InlineKeyboardButton(
-                            "❌ إلغاء الطلب",
-                            callback_data=f'ci_{file_id}'
-                        ))
-                        safe_send(chat_id,
-                                  f"📨 <b>الملف يطلب إدخال:</b>\n\n"
-                                  f"<code>{eh(line[:800])}</code>\n\n"
-                                  f"✍️ أرسل الإجابة الآن:",
-                                  reply_markup=markup,
-                                  parse_mode='HTML')
-                else:
-                    if shown_lines < MAX_SHOWN:
-                        pending_batch.append(line)
-                        shown_lines += 1
-                    if (time.time() - last_flush) > 1.5 or len(pending_batch) >= 15:
-                        flush_batch()
+            if not line or len(line) < 2:
+                continue
 
-    except Exception as e:
-        logging.error(f"monitor error: {e}")
+            # ✅ 1) طلب إدخال؟
+            if looks_prompt(line):
+                flush_errors()
+                prev_text, prev_time = last_prompt_sent.get(file_id, ("", 0))
+                now = time.time()
+                if line != prev_text or (now - prev_time) > 30:
+                    last_prompt_sent[file_id] = (line, now)
+                    pending_inputs[chat_id] = file_id
+
+                    markup = types.InlineKeyboardMarkup()
+                    markup.add(types.InlineKeyboardButton(
+                        "❌ إلغاء الطلب",
+                        callback_data=f'ci_{file_id}'
+                    ))
+                    safe_send(chat_id,
+                              f"📨 <b>الملف يطلب إدخال:</b>\n\n"
+                              f"<code>{eh(line[:800])}</code>\n\n"
+                              f"✍️ أرسل الإجابة:",
+                              reply_markup=markup,
+                              parse_mode='HTML')
+                continue
+
+            # ✅ 2) خطأ حقيقي؟
+            if is_real_error(line):
+                error_batch.append(line)
+
+                # أرسل مباشرة لو الخطأ مهم
+                if 'traceback' in line.lower() or 'error' in line.lower():
+                    # انتظر شوي حتى تتجمع باقي السطور
+                    if (time.time() - last_error_flush) > 0.5:
+                        flush_errors()
+                continue
+
+            # ✅ 3) أي شي ثاني → تجاهل تماماً (بدون إزعاج)
+
+    except Exception:
+        pass
     finally:
         if pending_inputs.get(chat_id) == file_id:
             pending_inputs.pop(chat_id, None)
+        last_prompt_sent.pop(file_id, None)
 
 
 def stop_one(chat_id, file_id, delete=False):
@@ -471,8 +584,8 @@ def stop_one(chat_id, file_id, delete=False):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
-        except Exception as e:
-            logging.error(f"stop error: {e}")
+        except:
+            pass
 
     if pending_inputs.get(chat_id) == file_id:
         pending_inputs.pop(chat_id, None)
@@ -594,9 +707,13 @@ def show_main_menu(message):
         f"مرحباً، {eh(message.from_user.first_name or '')}! ✨\n\n"
         f"👨‍💻 المطور: {YOUR_USERNAME}\n"
         f"📢 القناة: {ADMIN_CHANNEL}\n\n"
-        f"✅ يدعم Telethon / Pyrogram / Aiogram / telebot\n"
-        f"📂 تشغيل عدة ملفات متزامنة\n"
-        f"📨 تفاعل ذكي مع الرقم / OTP / 2FA\n\n"
+        f"✅ <b>يدعم:</b>\n"
+        f"• Telethon\n"
+        f"• Pyrogram\n"
+        f"• Aiogram\n"
+        f"• pyTelegramBotAPI\n\n"
+        f"📂 تشغيل عدة ملفات\n"
+        f"📨 تفاعل ذكي (رقم / OTP / 2FA)\n\n"
         f"اختر الخدمة:",
         reply_markup=markup,
         parse_mode='HTML'
@@ -613,9 +730,6 @@ def cmd_start(message):
     if not bot_running:
         safe_send(message.chat.id, "⏸️ البوت متوقف مؤقتاً.")
         return
-
-    if message.from_user.username in banned_users if 'banned_users' in dir() else False:
-        pass
 
     if is_approved(uid):
         show_main_menu(message)
@@ -642,15 +756,12 @@ def cmd_start(message):
                 reply_markup=markup,
                 parse_mode='HTML'
             )
-        except Exception as e:
-            logging.error(f"send admin: {e}")
+        except:
+            pass
 
         safe_send(message.chat.id, "⏳ تم إرسال طلبك للأدمن.")
 
 
-# ============================================================
-# معالج إدخال الملفات (أعلى أولوية)
-# ============================================================
 @bot.message_handler(
     func=lambda m: (
         m.chat.id in pending_inputs
@@ -683,16 +794,13 @@ def handle_input(message):
         else:
             masked = user_input[:2] + "*" * max(0, len(user_input) - 2)
 
-        safe_send(chat_id, f"✅ تم إرسال: <code>{eh(masked)}</code>\n⏳ جارٍ المتابعة...",
+        safe_send(chat_id, f"✅ تم إرسال: <code>{eh(masked)}</code>",
                   parse_mode='HTML')
         pending_inputs.pop(chat_id, None)
-    except Exception as e:
-        safe_send(chat_id, f"❌ فشل: {eh(str(e))}", parse_mode='HTML')
+    except:
+        safe_send(chat_id, "❌ فشل الإرسال")
 
 
-# ============================================================
-# تثبيت مكتبة
-# ============================================================
 @bot.message_handler(
     func=lambda m: m.chat.id in waiting_library and m.content_type == 'text'
 )
@@ -716,17 +824,14 @@ def handle_library_name(message):
             if r.returncode == 0:
                 msg = f"✅ تم تثبيت <code>{eh(lib_name)}</code>"
             else:
-                msg = f"❌ فشل:\n<pre>{eh(r.stderr[:500])}</pre>"
-        except Exception as e:
-            msg = f"❌ خطأ: {eh(str(e))}"
+                msg = f"❌ فشل التثبيت"
+        except:
+            msg = f"❌ خطأ"
         safe_send(chat_id, msg, parse_mode='HTML')
 
     executor.submit(install)
 
 
-# ============================================================
-# رفع الملفات
-# ============================================================
 @bot.message_handler(content_types=['document'])
 def handle_doc(message):
     uid = message.from_user.id
@@ -792,9 +897,8 @@ def handle_doc(message):
 
         safe_send(chat_id, f"📊 مجموع ملفاتك: <code>{total}</code>", parse_mode='HTML')
 
-    except Exception as e:
-        logging.error(f"handle_doc: {e}")
-        safe_send(message.chat.id, f"❌ خطأ: {eh(str(e))}", parse_mode='HTML')
+    except:
+        safe_send(message.chat.id, "❌ خطأ في الرفع")
 
 
 # ============================================================
@@ -896,7 +1000,8 @@ def cb_upload(call):
         return
     safe_answer(call.id, "📤")
     safe_send(call.message.chat.id,
-              "📥 <b>أرسل ملف .py الآن</b>",
+              "📥 <b>أرسل ملف .py الآن</b>\n\n"
+              "يدعم: Telethon / Pyrogram / Aiogram",
               parse_mode='HTML')
 
 
@@ -918,6 +1023,8 @@ def cb_about(call):
               f"🐍 منصة استضافة Python\n"
               f"📂 دعم ملفات متعددة\n"
               f"📞 تفاعل ذكي (رقم/OTP)\n\n"
+              f"<b>المكتبات المدعومة:</b>\n"
+              f"• Telethon\n• Pyrogram\n• Aiogram\n• pyTelegramBotAPI\n\n"
               f"👨‍💻 {YOUR_USERNAME}\n📢 {ADMIN_CHANNEL}",
               reply_markup=markup, parse_mode='HTML')
 
@@ -941,7 +1048,10 @@ def cb_install(call):
         return
     safe_answer(call.id)
     waiting_library.add(call.message.chat.id)
-    safe_send(call.message.chat.id, "📚 أرسل اسم المكتبة:")
+    safe_send(call.message.chat.id,
+              "📚 أرسل اسم المكتبة:\n\n"
+              "أمثلة: <code>pyrogram</code> - <code>telethon</code> - <code>tgcrypto</code>",
+              parse_mode='HTML')
 
 
 @bot.callback_query_handler(func=lambda c: c.data == 'protection')
@@ -1029,11 +1139,14 @@ def cb_users(call):
 def cb_approve(call):
     if not is_admin(call.from_user.id):
         return
-    uid = int(call.data.split('_')[1])
-    add_approved(uid, 'USER')
-    safe_answer(call.id, "✅")
     try:
-        bot.send_message(uid, "🎉 تمت الموافقة! أرسل /start")
+        uid = int(call.data.split('_')[1])
+        add_approved(uid, 'USER')
+        safe_answer(call.id, "✅")
+        try:
+            bot.send_message(uid, "🎉 تمت الموافقة! أرسل /start")
+        except:
+            pass
     except:
         pass
 
@@ -1042,14 +1155,14 @@ def cb_approve(call):
 def cb_reject(call):
     if not is_admin(call.from_user.id):
         return
-    uid = int(call.data.split('_')[1])
-    remove_pending(uid)
-    safe_answer(call.id, "❌")
+    try:
+        uid = int(call.data.split('_')[1])
+        remove_pending(uid)
+        safe_answer(call.id, "❌")
+    except:
+        pass
 
 
-# ============================================================
-# أمر البث
-# ============================================================
 @bot.message_handler(commands=['rck'])
 def cmd_broadcast(message):
     if not is_admin(message.from_user.id):
@@ -1073,24 +1186,9 @@ def cmd_broadcast(message):
 
 
 # ============================================================
-# معالجة أخطاء عامة + handlers إضافية
-# ============================================================
-@bot.message_handler(content_types=[
-    'audio', 'voice', 'video', 'video_note', 'sticker',
-    'contact', 'location', 'venue', 'animation', 'poll',
-    'photo'
-])
-def handle_other_content(message):
-    """✅ يستقبل أنواع إضافية من الرسائل (للتوافق مع البوتات المتطورة)"""
-    # نتجاهل بهدوء — لا نرسل رد
-    pass
-
-
-# ============================================================
-# Signal handling + Cleanup
+# Cleanup + Signals
 # ============================================================
 def cleanup_all_processes():
-    print("🧹 تنظيف العمليات...")
     try:
         for chat_id in list(active_processes.keys()):
             for file_id in list(active_processes[chat_id].keys()):
@@ -1105,13 +1203,11 @@ def cleanup_all_processes():
                             proc.kill()
                         except:
                             pass
-        print("✅ تم التنظيف")
-    except Exception as e:
-        print(f"cleanup error: {e}")
+    except:
+        pass
 
 
 def signal_handler(sig, frame):
-    print(f"\n📴 إشارة {sig}")
     cleanup_all_processes()
     sys.exit(0)
 
@@ -1125,70 +1221,40 @@ except:
 
 
 # ============================================================
-# ✅ Global Exception Handler
-# ============================================================
-def global_exception_handler(exc_type, exc_value, exc_tb):
-    import traceback
-    logging.error("=" * 55)
-    logging.error("EXCEPTION:")
-    logging.error("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
-    logging.error("=" * 55)
-
-
-sys.excepthook = global_exception_handler
-
-
-# ============================================================
-# ✅ التشغيل الرئيسي — مع دعم كل التحديثات
+# التشغيل
 # ============================================================
 if __name__ == "__main__":
     print("=" * 55)
     print("🚀 Bot starting...")
     print("=" * 55)
 
-    # ✅ 1) امسح webhook أول شي (حل مشكلة الأزرار)
-    print("🧹 مسح webhook...")
-    for attempt in range(5):
+    # ✅ 1) تثبيت المكتبات (Pyrogram, Telethon, etc)
+    auto_install_packages()
+
+    # ✅ 2) مسح webhook
+    for _ in range(3):
         try:
             bot.remove_webhook()
-            print("✅ تم مسح webhook")
             break
-        except Exception as e:
-            print(f"⚠️ محاولة {attempt + 1}: {e}")
-            time.sleep(2)
+        except:
+            time.sleep(1)
 
-    # ✅ 2) امسح التحديثات المتراكمة
+    # ✅ 3) تنظيف
     try:
-        bot.get_updates(offset=-1, timeout=2)
-        print("✅ تم تنظيف التحديثات")
-    except Exception as e:
-        print(f"⚠️ {e}")
+        bot.get_updates(offset=-1, timeout=1)
+    except:
+        pass
 
-    # ✅ 3) حلقة التشغيل مع كل التحديثات المدعومة
+    # ✅ 4) التشغيل
     ALLOWED_UPDATES = [
-        "message",
-        "edited_message",
-        "channel_post",
-        "edited_channel_post",
-        "inline_query",
-        "chosen_inline_result",
-        "callback_query",
-        "shipping_query",
-        "pre_checkout_query",
-        "poll",
-        "poll_answer",
-        "my_chat_member",
-        "chat_member",
-        "chat_join_request",
-        "new_chat_members",
+        "message", "edited_message", "channel_post",
+        "edited_channel_post", "inline_query", "callback_query",
+        "pre_checkout_query", "poll", "poll_answer",
+        "my_chat_member", "chat_member", "chat_join_request",
     ]
 
-    restart_count = 0
     while True:
         try:
-            restart_count += 1
-            print(f"🔄 محاولة تشغيل #{restart_count}")
-
             bot.infinity_polling(
                 timeout=60,
                 long_polling_timeout=60,
@@ -1196,14 +1262,7 @@ if __name__ == "__main__":
                 allowed_updates=ALLOWED_UPDATES
             )
         except KeyboardInterrupt:
-            print("⏹️ تم الإيقاف")
             cleanup_all_processes()
             break
-        except SystemExit:
-            break
-        except Exception as e:
-            logging.error(f"Polling error: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
-            print(f"⚠️ إعادة التشغيل بعد 5 ثواني...")
+        except:
             time.sleep(5)
