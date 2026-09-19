@@ -31,8 +31,8 @@ ADMIN_CHANNEL = '@FD_CQ'
 UPLOADED_FILES_DIR = "uploaded_files"
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
-# ✅ خيار التحكم بإظهار الأخطاء (اجعلها False لإخفاء الأخطاء تماماً)
-SHOW_ERRORS = False 
+# ✅ إخفاء الأخطاء (اجعلها False لإخفاء رسائل الأخطاء المزعجة)
+SHOW_ERRORS = False
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=10)
 executor = ThreadPoolExecutor(max_workers=10)
@@ -194,7 +194,7 @@ error_tracker = {}
 prompt_tracker = {}
 
 # ============================================================
-# ✅ الفلتر النهائي — دقيق جداً
+# ✅ الفلتر النهائي
 # ============================================================
 VERBS_AR = [r'أرسل', r'ارسل', r'أدخل', r'ادخل', r'اكتب', r'قم\s+بإرسال',
             r'قم\s+بإدخال', r'الرجاء\s+إدخال', r'الرجاء\s+ادخال',
@@ -292,10 +292,8 @@ def is_real_error(text):
     return False
 
 def send_error_once(chat_id, file_id, error_text):
-    # ✅ إخفاء الأخطاء إذا كان الخيار معطلاً
     if not SHOW_ERRORS:
         return
-        
     now = time.time()
     if file_id not in error_tracker:
         error_tracker[file_id] = {'last_error': '', 'last_time': 0, 'count': 0}
@@ -396,6 +394,8 @@ def monitor_output(chat_id, file_id, process):
                     if exit_code != 0:
                         if SHOW_ERRORS:
                             safe_send(chat_id, f"❌ <b>توقف بكود: {exit_code}</b>", parse_mode='HTML')
+                        else:
+                            safe_send(chat_id, "⚠️ <b>توقف الملف فجأة.</b>\n💡 تأكد أن إصدار Python هو 3.10 أو 3.11.", parse_mode='HTML')
                     else:
                         safe_send(chat_id, "✅ <b>انتهى بنجاح</b>", parse_mode='HTML')
                     break
@@ -433,7 +433,6 @@ def monitor_output(chat_id, file_id, process):
                 continue
             if looks_prompt(line):
                 if send_prompt_once(chat_id, file_id, line):
-                    # ✅ التعديل: لا نقوم بمسح حالة الانتظار فوراً، بل نتركها مفتوحة للإدخالات المتعددة
                     pending_inputs[chat_id] = file_id
                     markup = types.InlineKeyboardMarkup()
                     markup.add(types.InlineKeyboardButton(
@@ -446,7 +445,6 @@ def monitor_output(chat_id, file_id, process):
     except:
         pass
     finally:
-        # ✅ يتم مسح حالة الانتظار فقط عند انتهاء عمل السكربت
         if pending_inputs.get(chat_id) == file_id:
             pending_inputs.pop(chat_id, None)
 
@@ -606,10 +604,7 @@ def handle_input(message):
         else:
             masked = user_input[:2] + "*" * max(0, len(user_input) - 2)
         safe_send(chat_id, f"✅ <code>{eh(masked)}</code>", parse_mode='HTML')
-        
-        # ✅ تم إزالة pending_inputs.pop(chat_id, None) من هنا
-        # لكي يبقى البوت في وضع الاستماع حتى يرسل السكربت رسالة أخرى أو ينتهي
-        
+        # نترك وضع الاستماع مفتوحاً حتى يستقبل السكربت الإدخال التالي
     except:
         safe_send(chat_id, "❌ فشل الإرسال")
 
@@ -642,10 +637,9 @@ def handle_doc(message):
     try:
         chat_id = message.chat.id
         doc = message.document
-        # ✅ إصلاح أمني: تنظيف اسم الملف لمنع Path Traversal
         raw_name = doc.file_name or f"script_{uuid.uuid4().hex[:6]}.py"
         file_name = os.path.basename(raw_name)
-        
+
         if not file_name.endswith('.py'):
             safe_send(chat_id, "❌ فقط ملفات .py"); return
         if doc.file_size and doc.file_size > MAX_FILE_SIZE:
@@ -913,11 +907,12 @@ except: pass
 if __name__ == "__main__":
     print("=" * 55)
     print("🚀 Bot starting...")
-    
+
     if sys.version_info >= (3, 13):
-        print("⚠️ WARNING: Python 3.13 detected. Pyrogram may have compatibility issues!")
-        print("⚠️ Please consider using Python 3.10 or 3.11 for the host environment.")
-    
+        print("⚠️ WARNING: Python 3.13 detected! Pyrogram will not work!")
+        print("⚠️ Please create a '.python-version' file with '3.10' inside.")
+        print("⚠️ Then redeploy on Railway.")
+
     print("=" * 55)
 
     auto_install_packages()
