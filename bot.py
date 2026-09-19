@@ -38,7 +38,9 @@ YOUR_USERNAME = '@u_8_y'
 ADMIN_CHANNEL = '@FD_CQ'
 UPLOADED_FILES_DIR = 'uploaded_files'
 MAX_FILE_SIZE = 10 * 1024 * 1024
-SHOW_ERRORS = False
+
+# تم تفعيل الأخطاء لمعرفة سبب توقف السكربت إن حدث
+SHOW_ERRORS = True
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=10)
 executor = ThreadPoolExecutor(max_workers=10)
@@ -310,7 +312,6 @@ TARGETS_SPECIFIC = [
     r'\bbot_token\b',
     r'session\s+string',
     r'string\s+session',
-    r'enter\s+your\s+password',
     r'enter\s+your\s+phone',
     r'enter\s+the\s+code',
     r'please\s+enter\s+your\s+phone',
@@ -436,6 +437,7 @@ REAL_ERRORS = [
     'phonecodeinvalid',
     'sessionpasswordneeded',
     'authkeyunregistered',
+    'eoferror',
 ]
 IGNORE_SIGS = [
     'warning',
@@ -612,11 +614,11 @@ def monitor_output(chat_id, file_id, process):
           if exit_code != 0 and SHOW_ERRORS:
             safe_send(
                 chat_id,
-                f'❌ <b>توقف بكود: {exit_code}</b>',
+                f'❌ <b>توقف الملف بكود كود: {exit_code}</b>',
                 parse_mode='HTML',
             )
           elif exit_code == 0:
-            safe_send(chat_id, '✅ <b>انتهى بنجاح</b>', parse_mode='HTML')
+            safe_send(chat_id, '✅ <b>انتهى الملف بنجاح</b>', parse_mode='HTML')
           break
         time.sleep(0.03)
         continue
@@ -662,7 +664,6 @@ def monitor_output(chat_id, file_id, process):
               )
           )
 
-          # نص اللوحة مثل الصورة تماماً
           prompt_msg = (
               f'📞 <b>الملف يطلب إدخال:</b>\n\n'
               f'<code>{eh(line[:600])}</code>\n\n'
@@ -871,7 +872,7 @@ def cmd_start(message):
 
 
 # ============================================================
-# الاستجابة التفاعلية للإدخال
+# الاستجابة التفاعلية للإدخال (تم التعديل للتحقق المباشر)
 # ============================================================
 @bot.message_handler(
     func=lambda m: (
@@ -885,30 +886,37 @@ def handle_input(message):
   file_id = pending_inputs.get(chat_id)
   if not file_id:
     return
+
   if (
       chat_id not in active_processes
       or file_id not in active_processes[chat_id]
   ):
     pending_inputs.pop(chat_id, None)
+    safe_send(chat_id, '❌ الملف غير موجود بالقائمة.')
     return
+
   proc = active_processes[chat_id][file_id].get('process')
-  if not proc or proc.poll() is None:
+
+  # التحقق المرن لمعرفة سبب إغلاق العملية
+  if not proc or proc.poll() is not None:
     pending_inputs.pop(chat_id, None)
-    safe_send(chat_id, '❌ الملف لم يعد يعمل.')
+    safe_send(
+        chat_id,
+        '❌ <b>توقف الملف تلقائياً قبل استقبال المدخلات.</b>\nسيتم عرض'
+        ' الخطأ المسبب إن وجد أعلاه.',
+        parse_mode='HTML',
+    )
     return
 
   user_input = (message.text or '').strip()
   try:
-    # تمرير الإدخال فوراً للملف
     proc.stdin.write((user_input + '\n').encode('utf-8'))
     proc.stdin.flush()
 
-    # الرد التفاعلي كما يظهر بالصورة المرفقة
     bot.reply_to(message, 'تم إرسال الرد إلى الملف. ✅')
-
-    # إزالة حالة الانتظار لفتح المجال للطلب القادم
     pending_inputs.pop(chat_id, None)
   except Exception as e:
+    pending_inputs.pop(chat_id, None)
     safe_send(chat_id, f'❌ فشل الإرسال إلى الملف: {eh(str(e))}')
 
 
