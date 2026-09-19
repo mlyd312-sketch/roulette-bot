@@ -31,8 +31,8 @@ ADMIN_CHANNEL = '@FD_CQ'
 UPLOADED_FILES_DIR = "uploaded_files"
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
-# ✅ إخفاء الأخطاء (اجعلها False لإخفاء رسائل الأخطاء المزعجة)
-SHOW_ERRORS = False
+# ✅ خليتها True عشان نشوف الخطأ الحقيقي
+SHOW_ERRORS = True 
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=10)
 executor = ThreadPoolExecutor(max_workers=10)
@@ -604,7 +604,6 @@ def handle_input(message):
         else:
             masked = user_input[:2] + "*" * max(0, len(user_input) - 2)
         safe_send(chat_id, f"✅ <code>{eh(masked)}</code>", parse_mode='HTML')
-        # نترك وضع الاستماع مفتوحاً حتى يستقبل السكربت الإدخال التالي
     except:
         safe_send(chat_id, "❌ فشل الإرسال")
 
