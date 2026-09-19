@@ -18,8 +18,6 @@ YOUR_USERNAME = '@u_8_y'
 ADMIN_CHANNEL = '@FD_CQ'
 UPLOADED_FILES_DIR = "uploaded_files"
 MAX_FILE_SIZE = 10 * 1024 * 1024
-
-# ✅ إخفاء الأخطاء نهائياً
 SHOW_ERRORS = False
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=10)
