@@ -19,7 +19,7 @@ import telebot
 from telebot import types
 
 # ============================================================
-# ✅ إعدادات Timeouts (حل مشكلة ReadTimeout على Railway)
+# ✅ إعدادات Timeouts (حل مشكلة ReadTimeout على Railway والاستضافات)
 # ============================================================
 telebot.apihelper.CONNECT_TIMEOUT = 90
 telebot.apihelper.READ_TIMEOUT = 90
@@ -975,6 +975,7 @@ if __name__ == '__main__':
     except Exception as e:
         logging.warning(f"⚠️ remove_webhook: {e}")
 
+    # حلقة تشغيل متطورة وغير قابلة للتوقف
     while True:
         try:
             bot.polling(
