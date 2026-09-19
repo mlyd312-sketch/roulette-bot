@@ -18,7 +18,9 @@ YOUR_USERNAME = '@u_8_y'
 ADMIN_CHANNEL = '@FD_CQ'
 UPLOADED_FILES_DIR = "uploaded_files"
 MAX_FILE_SIZE = 10 * 1024 * 1024
-SHOW_ERRORS = False
+
+# ✅ خليتها True عشان نشوف الخطأ الحقيقي
+SHOW_ERRORS = True
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=10)
 executor = ThreadPoolExecutor(max_workers=10)
