@@ -3,6 +3,7 @@ import os
 import re
 import time
 import uuid
+import queue
 import sqlite3
 import logging
 import signal
@@ -97,7 +98,7 @@ def auto_install_packages():
 
 
 # ============================================================
-# دوال آمنة — كل شي بدون أخطاء
+# دوال آمنة
 # ============================================================
 def eh(text):
     if text is None:
@@ -244,7 +245,7 @@ prompt_tracker = {}
 
 
 # ============================================================
-# ✅ فلتر طلبات الإدخال — دقيق جداً
+# فلتر طلبات الإدخال
 # ============================================================
 VERBS_AR = [
     r'أرسل', r'ارسل', r'أدخل', r'ادخل', r'اكتب',
@@ -273,6 +274,10 @@ TARGETS_SPECIFIC = [
     r'2fa\s+code', r'otp\s+code',
     r'\bapi_id\b', r'\bapi_hash\b', r'\bbot_token\b',
     r'session\s+string', r'string\s+session',
+    r'enter\s+the\s+phone', r'enter\s+phone',
+    r'enter\s+the\s+code', r'enter\s+code',
+    r'enter\s+password', r'enter\s+the\s+password',
+    r'please\s+enter',
 ]
 
 FALSE_POSITIVES = [
@@ -301,13 +306,11 @@ def looks_prompt(text):
 
     t_lower = t.lower()
 
-    # استبعاد timestamps
     if re.match(r'^\d{2}:\d{2}', t):
         return False
     if re.match(r'^\d{4}[-/]\d{2}', t):
         return False
 
-    # استبعاد مستويات السجل
     log_markers = [
         ' - info - ', ' - warning - ', ' - debug - ', ' - error - ',
         ' - critical - ', '::info', '::warning', '::debug', '::error',
@@ -317,17 +320,14 @@ def looks_prompt(text):
         if lm in t_lower:
             return False
 
-    # استبعاد الكلمات السلبية
     for fp in FALSE_POSITIVES:
         if fp in t_lower:
             return False
 
-    # نمط صريح
     for p in TARGETS_SPECIFIC:
         if re.search(p, t, re.IGNORECASE):
             return True
 
-    # فعل + كلمة عامة
     has_verb = any(re.search(v, t, re.IGNORECASE) for v in (VERBS_AR + VERBS_EN))
     has_target = any(re.search(tg, t, re.IGNORECASE) for tg in TARGETS_GENERAL)
 
@@ -352,7 +352,22 @@ def send_prompt_once(chat_id, file_id, prompt_text):
 
 
 # ============================================================
-# تشغيل/إيقاف/مراقبة الملفات
+# ✅ دالة قراءة من stdout في الخلفية
+# ============================================================
+def _reader_thread(stream, q):
+    """يقرأ byte واحدة ويضعها في Queue"""
+    while True:
+        try:
+            ch = stream.read(1)
+            if not ch:
+                break
+            q.put(ch)
+        except:
+            break
+
+
+# ============================================================
+# تشغيل/إيقاف/مراقبة
 # ============================================================
 def start_file(script_path, chat_id, file_id):
     script_path = os.path.abspath(script_path)
@@ -434,40 +449,62 @@ def start_file(script_path, chat_id, file_id):
             safe_send(chat_id, f"❌ فشل في التشغيل: {eh(str(e))}", parse_mode='HTML')
 
 
+# ============================================================
+# ✅ المراقبة مع Idle Flush (الحل الرئيسي)
+# ============================================================
 def monitor_output(chat_id, file_id, process):
-    """✅ صامت 100% — فقط طلبات الإدخال"""
+    """✅ يراقب stdout مع idle flush للأوامر بدون newline"""
+    q = queue.Queue()
+    reader = threading.Thread(
+        target=_reader_thread,
+        args=(process.stdout, q),
+        daemon=True
+    )
+    reader.start()
+
     buffer = ""
+    IDLE_FLUSH = 1.2  # ثواني
+
+    def handle_line(line):
+        """يعالج السطر إذا كان طلب إدخال"""
+        line = line.strip()
+        if not line or not looks_prompt(line):
+            return
+        if not send_prompt_once(chat_id, file_id, line):
+            return
+
+        pending_inputs[chat_id] = file_id
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton(
+            "❌ إلغاء الطلب",
+            callback_data=f'ci_{file_id}'
+        ))
+        safe_send(
+            chat_id,
+            f"📨 <b>الملف يطلب إدخال:</b>\n\n"
+            f"<code>{eh(line[:600])}</code>\n\n"
+            f"✍️ أرسل الإجابة:",
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
 
     try:
         while True:
             try:
-                ch = process.stdout.read(1)
-            except:
-                break
+                ch = q.get(timeout=IDLE_FLUSH)
+            except queue.Empty:
+                # ✅ لا جديد لـ 1.2 ثانية — نفرّغ buffer
+                if buffer.strip():
+                    handle_line(buffer)
+                    buffer = ""
 
-            if not ch:
-                if process.poll() is not None:
-                    # الملف انتهى — لا نطبع شي
-                    remaining = buffer.strip()
-                    if remaining and looks_prompt(remaining):
-                        if send_prompt_once(chat_id, file_id, remaining):
-                            pending_inputs[chat_id] = file_id
-                            markup = types.InlineKeyboardMarkup()
-                            markup.add(types.InlineKeyboardButton(
-                                "❌ إلغاء الطلب",
-                                callback_data=f'ci_{file_id}'
-                            ))
-                            safe_send(
-                                chat_id,
-                                f"📨 <b>الملف يطلب إدخال:</b>\n\n"
-                                f"<code>{eh(remaining[:600])}</code>\n\n"
-                                f"✍️ أرسل الإجابة:",
-                                reply_markup=markup,
-                                parse_mode='HTML'
-                            )
+                # لو الملف انتهى
+                if process.poll() is not None and q.empty():
                     break
-                time.sleep(0.03)
                 continue
+
+            if ch is None:
+                break
 
             try:
                 decoded = ch.decode('utf-8', errors='replace')
@@ -476,40 +513,17 @@ def monitor_output(chat_id, file_id, process):
 
             buffer += decoded
 
-            # شرط flush
-            flush = False
+            # flush على newline أو علامات
             if '\n' in decoded:
-                flush = True
+                handle_line(buffer)
+                buffer = ""
             elif decoded in ('؟', '?', ':', '!', '؛', '،') and len(buffer.strip()) >= 4:
-                flush = True
+                handle_line(buffer)
+                buffer = ""
 
-            if not flush:
-                continue
-
-            line = buffer.strip()
-            buffer = ""
-
-            if not line:
-                continue
-
-            # ✅ فقط طلبات الإدخال — كل شي ثاني نتجاهله
-            if looks_prompt(line):
-                if send_prompt_once(chat_id, file_id, line):
-                    pending_inputs[chat_id] = file_id
-
-                    markup = types.InlineKeyboardMarkup()
-                    markup.add(types.InlineKeyboardButton(
-                        "❌ إلغاء الطلب",
-                        callback_data=f'ci_{file_id}'
-                    ))
-                    safe_send(
-                        chat_id,
-                        f"📨 <b>الملف يطلب إدخال:</b>\n\n"
-                        f"<code>{eh(line[:600])}</code>\n\n"
-                        f"✍️ أرسل الإجابة:",
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
+        # في النهاية — فرّغ المتبقي
+        if buffer.strip():
+            handle_line(buffer)
 
     except:
         pass
