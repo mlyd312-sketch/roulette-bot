@@ -17,7 +17,7 @@ import telebot
 from telebot import types
 
 # ============================================================
-# إسكات كل الـ logging
+# Logging هادئ
 # ============================================================
 logging.basicConfig(level=logging.CRITICAL, handlers=[logging.NullHandler()])
 for name in ['telebot', 'urllib3', 'requests', 'telegram', 'pyrogram',
@@ -48,7 +48,7 @@ os.makedirs(UPLOADED_FILES_DIR, exist_ok=True)
 
 
 # ============================================================
-# التثبيت التلقائي للمكتبات
+# التثبيت التلقائي (Pyrogram + الباقي)
 # ============================================================
 REQUIRED_PACKAGES = [
     ("pyrogram", "pyrogram"),
@@ -86,6 +86,7 @@ def auto_install_packages():
             missing.append(pip_name)
         except:
             pass
+
     for pip_name in missing:
         try:
             subprocess.run(
@@ -98,8 +99,43 @@ def auto_install_packages():
 
 
 # ============================================================
-# دوال آمنة
+# الإيموجيات المميزة
 # ============================================================
+E = {
+    'fire': '5424972470023104089',
+    'check': '5206607081334906820',
+    'sparkles': '5325547803936572038',
+    'gem': '5427168083074628963',
+    'pencil': '5395444784611480792',
+    'settings': '5341715473882955310',
+    'crown': '5217822164362739968',
+    'chart': '5231200819986047254',
+    'warning': '5447644880824181073',
+    'people': '5258513401784573443',
+    'link': '5271604874419647061',
+    'arrow': '5416117059207572332',
+    'cross': '5210952531676504517',
+    'bulb': '5422439311196834318',
+    'bell': '5458603043203327669',
+    'python': '5260480440971570446',
+    'folder': '5431449001532594346',
+    'restart': '5372860804316422072',
+    'trash': '5445267414562389170',
+    'stop': '5411225014148014586',
+    'phone': '5445358775149883195',
+    'key': '5424562381729012108',
+    'shield': '5217549631293379466',
+    'robot': '5258113901106580375',
+}
+
+
+def ce(key, default="✨"):
+    eid = E.get(key)
+    if eid:
+        return f'<tg-emoji emoji-id="{eid}">{default}</tg-emoji>'
+    return default
+
+
 def eh(text):
     if text is None:
         return ""
@@ -245,42 +281,18 @@ prompt_tracker = {}
 
 
 # ============================================================
-# فلتر طلبات الإدخال
+# كلمات طلبات الإدخال
 # ============================================================
-VERBS_AR = [
-    r'أرسل', r'ارسل', r'أدخل', r'ادخل', r'اكتب',
-    r'قم\s+بإرسال', r'قم\s+بإدخال',
-    r'الرجاء\s+إدخال', r'الرجاء\s+ادخال',
-    r'من\s+فضلك\s+أرسل', r'من\s+فضلك\s+ارسل',
-]
-VERBS_EN = [
-    r'\benter\b', r'\binput\b', r'\bsend\b', r'\bprovide\b',
-    r'\btype\b', r'please\s+enter', r'please\s+send', r'please\s+provide',
+INPUT_KEYWORDS = [
+    'أرسل', 'ارسل', 'ادخل', 'أدخل', 'اكتب', 'رقم', 'كود', 'رمز',
+    'otp', 'phone', 'code', 'password', 'pass', '2fa',
+    'كلمة السر', 'كلمة سر', 'التحقق', 'الهاتف', 'هاتف',
+    'input', 'enter', 'token', 'session', 'api_id', 'api_hash',
+    'bot_token', 'auth', 'key', 'verify', 'login', 'sign', 'pin',
+    'number', 'account',
 ]
 
-TARGETS_GENERAL = [
-    r'\bرقم\b', r'\bكود\b', r'\bرمز\b', r'\bهاتف\b',
-    r'\bphone\b', r'\bnumber\b', r'\bcode\b', r'\botp\b',
-    r'\bpassword\b', r'\bpass\b',
-]
-
-TARGETS_SPECIFIC = [
-    r'رقم\s+الهاتف', r'رقم\s+هاتف',
-    r'كود\s+التحقق', r'رمز\s+التحقق',
-    r'كلمة\s+السر', r'كلمة\s+المرور',
-    r'التحقق\s+بخطوتين', r'التحقق\s+بخطوتي',
-    r'phone\s+number', r'verification\s+code',
-    r'login\s+code', r'auth\s+code',
-    r'2fa\s+code', r'otp\s+code',
-    r'\bapi_id\b', r'\bapi_hash\b', r'\bbot_token\b',
-    r'session\s+string', r'string\s+session',
-    r'enter\s+the\s+phone', r'enter\s+phone',
-    r'enter\s+the\s+code', r'enter\s+code',
-    r'enter\s+password', r'enter\s+the\s+password',
-    r'please\s+enter',
-]
-
-FALSE_POSITIVES = [
+FALSE_WORDS = [
     'traceback', 'error', 'exception', 'warning', 'failed', 'fail',
     'success', 'connected', 'connection', 'loading', 'loaded',
     'starting', 'started', 'ready', 'listening', 'sending',
@@ -288,10 +300,10 @@ FALSE_POSITIVES = [
     'closing', 'saved', 'stored', 'checked', 'verifying',
     'checking', 'processing', 'looking', 'searching', 'waiting',
     'timeout', 'retry', 'deprecated', 'debug', 'info:', 'warn:',
-    'note:', 'auth key', 'session', 'initialized', 'initializing',
-    'reading', 'listening on', 'connection established',
-    'connection lost', 'connection failed', 'run ok', 'ready to',
-    'created', 'setup', 'installed', 'finished', 'done', 'complete',
+    'note:', 'auth key', 'session initialized', 'session created',
+    'session loaded', 'session saved', 'initialized', 'initializing',
+    'reading', 'connection established', 'run ok', 'ready to',
+    'done auth', 'done',
 ]
 
 
@@ -300,41 +312,29 @@ def looks_prompt(text):
         return False
 
     t = text.strip()
-
     if len(t) < 4 or len(t) > 200:
         return False
 
     t_lower = t.lower()
 
+    # استبعاد timestamps
     if re.match(r'^\d{2}:\d{2}', t):
         return False
     if re.match(r'^\d{4}[-/]\d{2}', t):
         return False
 
-    log_markers = [
-        ' - info - ', ' - warning - ', ' - debug - ', ' - error - ',
-        ' - critical - ', '::info', '::warning', '::debug', '::error',
-        '[info]', '[warning]', '[debug]', '[error]',
-    ]
-    for lm in log_markers:
+    # استبعاد markers السجل
+    for lm in [' - info - ', ' - warning - ', ' - debug - ', ' - error - ',
+               '::info', '::warning', '::debug', '::error',
+               '[info]', '[warning]', '[debug]', '[error]']:
         if lm in t_lower:
             return False
 
-    for fp in FALSE_POSITIVES:
-        if fp in t_lower:
+    for fw in FALSE_WORDS:
+        if fw in t_lower:
             return False
 
-    for p in TARGETS_SPECIFIC:
-        if re.search(p, t, re.IGNORECASE):
-            return True
-
-    has_verb = any(re.search(v, t, re.IGNORECASE) for v in (VERBS_AR + VERBS_EN))
-    has_target = any(re.search(tg, t, re.IGNORECASE) for tg in TARGETS_GENERAL)
-
-    if has_verb and has_target:
-        return True
-
-    return False
+    return any(kw.lower() in t_lower for kw in INPUT_KEYWORDS)
 
 
 def send_prompt_once(chat_id, file_id, prompt_text):
@@ -352,10 +352,9 @@ def send_prompt_once(chat_id, file_id, prompt_text):
 
 
 # ============================================================
-# ✅ دالة قراءة من stdout في الخلفية
+# قراءة stdout في الخلفية (لتفادي التعليق)
 # ============================================================
 def _reader_thread(stream, q):
-    """يقرأ byte واحدة ويضعها في Queue"""
     while True:
         try:
             ch = stream.read(1)
@@ -367,7 +366,7 @@ def _reader_thread(stream, q):
 
 
 # ============================================================
-# تشغيل/إيقاف/مراقبة
+# تشغيل الملفات
 # ============================================================
 def start_file(script_path, chat_id, file_id):
     script_path = os.path.abspath(script_path)
@@ -388,11 +387,11 @@ def start_file(script_path, chat_id, file_id):
 
         proc = info.get('process')
         if proc and proc.poll() is None:
-            safe_send(chat_id, "⚠️ الملف يعمل بالفعل.")
+            safe_send(chat_id, f"{ce('warning', '⚠️')} الملف يعمل بالفعل.", parse_mode='HTML')
             return
 
         if not os.path.exists(script_path):
-            safe_send(chat_id, "❌ الملف غير موجود.")
+            safe_send(chat_id, f"{ce('cross', '❌')} الملف غير موجود.", parse_mode='HTML')
             return
 
         try:
@@ -419,9 +418,9 @@ def start_file(script_path, chat_id, file_id):
 
             markup = types.InlineKeyboardMarkup(row_width=3)
             markup.add(
-                types.InlineKeyboardButton("🛑 إيقاف", callback_data=f'sf_{file_id}'),
-                types.InlineKeyboardButton("🔄 إعادة", callback_data=f'rf_{file_id}'),
-                types.InlineKeyboardButton("🗑️ حذف", callback_data=f'df_{file_id}')
+                types.InlineKeyboardButton(f"🛑 إيقاف", callback_data=f'sf_{file_id}'),
+                types.InlineKeyboardButton(f"🔄 إعادة", callback_data=f'rf_{file_id}'),
+                types.InlineKeyboardButton(f"🗑️ حذف", callback_data=f'df_{file_id}')
             )
             markup.add(types.InlineKeyboardButton(
                 f"📂 ملفاتي ({len(active_processes[chat_id])})",
@@ -430,10 +429,10 @@ def start_file(script_path, chat_id, file_id):
 
             safe_send(
                 chat_id,
-                f"✅ <b>تم تشغيل الملف بنجاح</b>\n"
-                f"📁 <code>{eh(info['name'])}</code>\n"
-                f"🆔 <code>{file_id}</code>\n"
-                f"⚡ جارٍ مراقبة الإدخال...",
+                f"{ce('check', '✅')} <b>تم تشغيل الملف بنجاح</b>\n"
+                f"{ce('python', '📁')} الاسم: <code>{eh(info['name'])}</code>\n"
+                f"{ce('key', '🆔')} المُعرّف: <code>{file_id}</code>\n\n"
+                f"{ce('robot', '⚡')} جارٍ مراقبة المدخلات...",
                 reply_markup=markup,
                 parse_mode='HTML'
             )
@@ -446,14 +445,15 @@ def start_file(script_path, chat_id, file_id):
             t.start()
 
         except Exception as e:
-            safe_send(chat_id, f"❌ فشل في التشغيل: {eh(str(e))}", parse_mode='HTML')
+            safe_send(chat_id,
+                      f"{ce('cross', '❌')} فشل في التشغيل: {eh(str(e))}",
+                      parse_mode='HTML')
 
 
 # ============================================================
-# ✅ المراقبة مع Idle Flush (الحل الرئيسي)
+# مراقبة المخرجات — مع Idle Flush
 # ============================================================
 def monitor_output(chat_id, file_id, process):
-    """✅ يراقب stdout مع idle flush للأوامر بدون newline"""
     q = queue.Queue()
     reader = threading.Thread(
         target=_reader_thread,
@@ -463,10 +463,9 @@ def monitor_output(chat_id, file_id, process):
     reader.start()
 
     buffer = ""
-    IDLE_FLUSH = 1.2  # ثواني
+    IDLE_FLUSH = 1.2
 
     def handle_line(line):
-        """يعالج السطر إذا كان طلب إدخال"""
         line = line.strip()
         if not line or not looks_prompt(line):
             return
@@ -476,14 +475,14 @@ def monitor_output(chat_id, file_id, process):
         pending_inputs[chat_id] = file_id
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton(
-            "❌ إلغاء الطلب",
+            f"❌ إلغاء الطلب",
             callback_data=f'ci_{file_id}'
         ))
         safe_send(
             chat_id,
-            f"📨 <b>الملف يطلب إدخال:</b>\n\n"
+            f"{ce('phone', '📨')} <b>الملف يطلب إدخال:</b>\n\n"
             f"<code>{eh(line[:600])}</code>\n\n"
-            f"✍️ أرسل الإجابة:",
+            f"{ce('pencil', '✍️')} أرسل الإجابة:",
             reply_markup=markup,
             parse_mode='HTML'
         )
@@ -493,12 +492,10 @@ def monitor_output(chat_id, file_id, process):
             try:
                 ch = q.get(timeout=IDLE_FLUSH)
             except queue.Empty:
-                # ✅ لا جديد لـ 1.2 ثانية — نفرّغ buffer
                 if buffer.strip():
                     handle_line(buffer)
                     buffer = ""
 
-                # لو الملف انتهى
                 if process.poll() is not None and q.empty():
                     break
                 continue
@@ -513,7 +510,6 @@ def monitor_output(chat_id, file_id, process):
 
             buffer += decoded
 
-            # flush على newline أو علامات
             if '\n' in decoded:
                 handle_line(buffer)
                 buffer = ""
@@ -521,7 +517,6 @@ def monitor_output(chat_id, file_id, process):
                 handle_line(buffer)
                 buffer = ""
 
-        # في النهاية — فرّغ المتبقي
         if buffer.strip():
             handle_line(buffer)
 
@@ -600,19 +595,20 @@ def show_my_files(call, edit=False):
     chat_id = call.message.chat.id
 
     if chat_id not in active_processes or not active_processes[chat_id]:
-        txt = "📂 لا توجد ملفات."
+        txt = f"{ce('folder', '📂')} لا توجد ملفات."
         if edit:
-            safe_edit(chat_id, call.message.message_id, txt)
+            safe_edit(chat_id, call.message.message_id, txt, parse_mode='HTML')
         else:
-            safe_send(chat_id, txt)
+            safe_send(chat_id, txt, parse_mode='HTML')
         return
 
     files = active_processes[chat_id]
     running = sum(1 for f in files.values()
                   if f.get('process') and f['process'].poll() is None)
 
-    text = (f"📂 <b>ملفاتك</b> ({len(files)})\n"
-            f"🟢 يعمل: {running} | 🔴 متوقف: {len(files) - running}")
+    text = (f"{ce('folder', '📂')} <b>ملفاتك</b> ({len(files)})\n"
+            f"{ce('check', '🟢')} يعمل: {running} | "
+            f"{ce('stop', '🔴')} متوقف: {len(files) - running}")
 
     markup = types.InlineKeyboardMarkup(row_width=4)
     for fid, info in files.items():
@@ -627,8 +623,8 @@ def show_my_files(call, edit=False):
         )
 
     markup.row(
-        types.InlineKeyboardButton("🛑 إيقاف الكل", callback_data='stop_all'),
-        types.InlineKeyboardButton("🔙 القائمة", callback_data='back_to_main')
+        types.InlineKeyboardButton(f"{ce('stop', '🛑')} إيقاف الكل", callback_data='stop_all'),
+        types.InlineKeyboardButton(f"{ce('arrow', '🔙')} القائمة", callback_data='back_to_main')
     )
 
     if edit:
@@ -645,40 +641,44 @@ def show_my_files(call, edit=False):
 # ============================================================
 def show_main_menu(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
+
     markup.add(
-        types.InlineKeyboardButton("🛡️ الحماية", callback_data='protection'),
-        types.InlineKeyboardButton("📥 رفع ملف", callback_data='upload')
+        types.InlineKeyboardButton(f"{ce('shield', '🛡️')} الحماية", callback_data='protection'),
+        types.InlineKeyboardButton(f"{ce('python', '📥')} رفع ملف", callback_data='upload')
     )
     markup.add(
-        types.InlineKeyboardButton("📂 ملفاتي", callback_data='my_files'),
-        types.InlineKeyboardButton("👩‍💼 فتاة المحاور", callback_data='support_girl')
+        types.InlineKeyboardButton(f"{ce('folder', '📂')} ملفاتي", callback_data='my_files'),
+        types.InlineKeyboardButton(f"{ce('sparkles', '👩‍💼')} فتاة المحاور", callback_data='support_girl')
     )
     markup.add(
-        types.InlineKeyboardButton("🚀 السرعة", callback_data='speed'),
-        types.InlineKeyboardButton("ℹ️ حول البوت", callback_data='about')
+        types.InlineKeyboardButton(f"{ce('fire', '🚀')} السرعة", callback_data='speed'),
+        types.InlineKeyboardButton(f"{ce('bulb', 'ℹ️')} حول البوت", callback_data='about')
     )
     markup.add(
-        types.InlineKeyboardButton("🛠️ الدعم الفني", callback_data='tech_support'),
-        types.InlineKeyboardButton("📚 تثبيت مكتبة", callback_data='install_lib')
+        types.InlineKeyboardButton(f"{ce('bell', '🛠️')} الدعم الفني", callback_data='tech_support'),
+        types.InlineKeyboardButton(f"{ce('pencil', '📚')} تثبيت مكتبة", callback_data='install_lib')
     )
-    markup.add(types.InlineKeyboardButton("📞 التواصل مع الدعم", callback_data='support'))
+    markup.add(
+        types.InlineKeyboardButton(f"{ce('link', '📞')} التواصل مع الدعم", callback_data='support')
+    )
 
     if is_admin(message.from_user.id):
         markup.add(
-            types.InlineKeyboardButton("👥 المستخدمون", callback_data='users'),
-            types.InlineKeyboardButton("⚡ حالة البوت", callback_data='bot_status')
+            types.InlineKeyboardButton(f"{ce('people', '👥')} المستخدمون", callback_data='users'),
+            types.InlineKeyboardButton(f"{ce('crown', '⚡')} حالة البوت", callback_data='bot_status')
         )
 
     safe_send(
         message.chat.id,
-        f"🐍 <b>Python Hosting</b>\n\n"
-        f"مرحباً، {eh(message.from_user.first_name or '')}! ✨\n\n"
-        f"👨‍💻 المطور: {YOUR_USERNAME}\n"
-        f"📢 القناة: {ADMIN_CHANNEL}\n\n"
-        f"✅ Telethon • Pyrogram • Aiogram • telebot\n\n"
-        f"📂 تشغيل عدة ملفات\n"
-        f"📨 تفاعل ذكي (رقم / OTP / 2FA)\n\n"
-        f"اختر الخدمة:",
+        f"{ce('python', '🐍')} <b>Python Hosting</b> {ce('python', '🐍')}\n\n"
+        f"مرحباً، {eh(message.from_user.first_name or '')}! {ce('sparkles', '✨')}\n\n"
+        f"{ce('crown', '👨‍💻')} المطور: {YOUR_USERNAME}\n"
+        f"{ce('link', '📢')} القناة: {ADMIN_CHANNEL}\n\n"
+        f"{ce('check', '✅')} <b>المكتبات المدعومة:</b>\n"
+        f"• Telethon • Pyrogram • Aiogram • telebot\n\n"
+        f"{ce('folder', '📂')} تشغيل عدة ملفات متزامنة\n"
+        f"{ce('phone', '📨')} تفاعل ذكي (رقم / OTP / 2FA)\n\n"
+        f"<b>اختر الخدمة من الأزرار أدناه:</b>",
         reply_markup=markup,
         parse_mode='HTML'
     )
@@ -692,13 +692,17 @@ def cmd_start(message):
     uid = message.from_user.id
 
     if not bot_running:
-        safe_send(message.chat.id, "⏸️ البوت متوقف مؤقتاً.")
+        safe_send(message.chat.id,
+                  f"{ce('warning', '⏸️')} البوت متوقف مؤقتاً.",
+                  parse_mode='HTML')
         return
 
     if is_approved(uid):
         show_main_menu(message)
     elif is_pending(uid):
-        safe_send(message.chat.id, "⏳ طلبك قيد المراجعة.")
+        safe_send(message.chat.id,
+                  f"{ce('bell', '⏳')} طلبك قيد المراجعة.",
+                  parse_mode='HTML')
     else:
         fname = eh(message.from_user.first_name or 'مستخدم')
         uname = message.from_user.username or 'بدون_يوزر'
@@ -706,26 +710,31 @@ def cmd_start(message):
 
         markup = types.InlineKeyboardMarkup()
         markup.add(
-            types.InlineKeyboardButton("✅ قبول", callback_data=f'ap_{uid}'),
-            types.InlineKeyboardButton("❌ رفض", callback_data=f'rj_{uid}')
+            types.InlineKeyboardButton(f"{ce('check', '✅')} قبول", callback_data=f'ap_{uid}'),
+            types.InlineKeyboardButton(f"{ce('cross', '❌')} رفض", callback_data=f'rj_{uid}')
         )
 
         try:
             bot.send_message(
                 ADMIN_ID,
-                f"📋 <b>طلب اشتراك جديد:</b>\n\n"
-                f"👤 {fname}\n"
-                f"🆔 <code>{uid}</code>\n"
-                f"📌 @{eh(uname)}",
+                f"{ce('pencil', '📋')} <b>طلب اشتراك جديد:</b>\n\n"
+                f"{ce('people', '👤')} الاسم: {fname}\n"
+                f"{ce('link', '🆔')} <code>{uid}</code>\n"
+                f"{ce('sparkles', '📌')} @{eh(uname)}",
                 reply_markup=markup,
                 parse_mode='HTML'
             )
         except:
             pass
 
-        safe_send(message.chat.id, "⏳ تم إرسال طلبك للأدمن.")
+        safe_send(message.chat.id,
+                  f"{ce('bell', '⏳')} تم إرسال طلبك للأدمن.",
+                  parse_mode='HTML')
 
 
+# ============================================================
+# معالج الإدخال (أعلى أولوية)
+# ============================================================
 @bot.message_handler(
     func=lambda m: (
         m.chat.id in pending_inputs
@@ -745,7 +754,9 @@ def handle_input(message):
     proc = active_processes[chat_id][file_id].get('process')
     if not proc or proc.poll() is not None:
         pending_inputs.pop(chat_id, None)
-        safe_send(chat_id, "❌ الملف لم يعد يعمل.")
+        safe_send(chat_id,
+                  f"{ce('cross', '❌')} الملف لم يعد يعمل.",
+                  parse_mode='HTML')
         return
 
     user_input = (message.text or '').strip()
@@ -758,12 +769,20 @@ def handle_input(message):
         else:
             masked = user_input[:2] + "*" * max(0, len(user_input) - 2)
 
-        safe_send(chat_id, f"✅ تم إرسال: <code>{eh(masked)}</code>", parse_mode='HTML')
+        safe_send(chat_id,
+                  f"{ce('check', '✅')} تم إرسال: <code>{eh(masked)}</code>\n"
+                  f"{ce('robot', '⏳')} جارٍ المتابعة...",
+                  parse_mode='HTML')
         pending_inputs.pop(chat_id, None)
     except:
-        safe_send(chat_id, "❌ فشل الإرسال")
+        safe_send(chat_id,
+                  f"{ce('cross', '❌')} فشل الإرسال",
+                  parse_mode='HTML')
 
 
+# ============================================================
+# تثبيت مكتبة
+# ============================================================
 @bot.message_handler(func=lambda m: m.chat.id in waiting_library and m.content_type == 'text')
 def handle_library_name(message):
     chat_id = message.chat.id
@@ -771,10 +790,14 @@ def handle_library_name(message):
 
     lib_name = (message.text or '').strip()
     if not re.match(r'^[a-zA-Z0-9_\-\.]+(\s*[<>=!]+\s*[0-9a-zA-Z\.\-]+)?$', lib_name):
-        safe_send(chat_id, "❌ اسم غير صالح.")
+        safe_send(chat_id,
+                  f"{ce('cross', '❌')} اسم غير صالح.",
+                  parse_mode='HTML')
         return
 
-    safe_send(chat_id, f"⏳ جاري تثبيت <code>{eh(lib_name)}</code>...", parse_mode='HTML')
+    safe_send(chat_id,
+              f"{ce('fire', '🔥')} جاري تثبيت <code>{eh(lib_name)}</code>...",
+              parse_mode='HTML')
 
     def install():
         try:
@@ -783,26 +806,33 @@ def handle_library_name(message):
                 capture_output=True, text=True, timeout=300
             )
             if r.returncode == 0:
-                msg = f"✅ تم تثبيت <code>{eh(lib_name)}</code>"
+                msg = f"{ce('check', '✅')} تم تثبيت <code>{eh(lib_name)}</code>"
             else:
-                msg = f"❌ فشل التثبيت"
+                msg = f"{ce('cross', '❌')} فشل التثبيت"
         except:
-            msg = "❌ خطأ"
+            msg = f"{ce('cross', '❌')} خطأ"
         safe_send(chat_id, msg, parse_mode='HTML')
 
     executor.submit(install)
 
 
+# ============================================================
+# رفع الملفات
+# ============================================================
 @bot.message_handler(content_types=['document'])
 def handle_doc(message):
     uid = message.from_user.id
 
     if not is_approved(uid):
-        safe_send(message.chat.id, "❌ غير مصرح")
+        safe_send(message.chat.id,
+                  f"{ce('cross', '❌')} غير مصرح",
+                  parse_mode='HTML')
         return
 
     if not bot_running:
-        safe_send(message.chat.id, "⏸️ البوت متوقف.")
+        safe_send(message.chat.id,
+                  f"{ce('warning', '⏸️')} البوت متوقف.",
+                  parse_mode='HTML')
         return
 
     if message.chat.id in waiting_library:
@@ -814,11 +844,15 @@ def handle_doc(message):
         file_name = doc.file_name or f"script_{uuid.uuid4().hex[:6]}.py"
 
         if not file_name.endswith('.py'):
-            safe_send(chat_id, "❌ فقط ملفات .py")
+            safe_send(chat_id,
+                      f"{ce('cross', '❌')} فقط ملفات .py",
+                      parse_mode='HTML')
             return
 
         if doc.file_size and doc.file_size > MAX_FILE_SIZE:
-            safe_send(chat_id, f"⛔ الحجم > {MAX_FILE_SIZE // (1024*1024)}MB")
+            safe_send(chat_id,
+                      f"{ce('warning', '⛔')} الحجم > {MAX_FILE_SIZE // (1024*1024)}MB",
+                      parse_mode='HTML')
             return
 
         file_info = bot.get_file(doc.file_id)
@@ -840,7 +874,9 @@ def handle_doc(message):
                     os.remove(save_path)
                 except:
                     pass
-                safe_send(chat_id, f"⛔ {eh(reason)}", parse_mode='HTML')
+                safe_send(chat_id,
+                          f"{ce('warning', '⛔')} {eh(reason)}",
+                          parse_mode='HTML')
                 return
 
         if chat_id not in active_processes:
@@ -856,10 +892,14 @@ def handle_doc(message):
         total = len(active_processes[chat_id])
         start_file(save_path, chat_id, file_id)
 
-        safe_send(chat_id, f"📊 مجموع ملفاتك: <code>{total}</code>", parse_mode='HTML')
+        safe_send(chat_id,
+                  f"{ce('chart', '📊')} مجموع ملفاتك: <code>{total}</code>",
+                  parse_mode='HTML')
 
     except:
-        safe_send(message.chat.id, "❌ خطأ في الرفع")
+        safe_send(message.chat.id,
+                  f"{ce('cross', '❌')} خطأ في الرفع",
+                  parse_mode='HTML')
 
 
 # ============================================================
@@ -907,7 +947,8 @@ def cb_delete(call):
 def cb_cancel_input(call):
     pending_inputs.pop(call.message.chat.id, None)
     safe_answer(call.id, "✅")
-    safe_edit(call.message.chat.id, call.message.message_id, "🚫 تم الإلغاء.")
+    safe_edit(call.message.chat.id, call.message.message_id,
+              "🚫 تم الإلغاء.", parse_mode='HTML')
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith('nf_'))
@@ -961,30 +1002,36 @@ def cb_upload(call):
         return
     safe_answer(call.id, "📤")
     safe_send(call.message.chat.id,
-              "📥 <b>أرسل ملف .py الآن</b>\n\n"
-              "يدعم: Telethon / Pyrogram / Aiogram",
+              f"{ce('pencil', '📥')} <b>أرسل ملف .py الآن</b>\n\n"
+              f"{ce('check', '✅')} يدعم: Telethon / Pyrogram / Aiogram",
               parse_mode='HTML')
 
 
 @bot.callback_query_handler(func=lambda c: c.data == 'speed')
 def cb_speed(call):
     safe_answer(call.id)
-    msg = safe_send(call.message.chat.id, "⏳")
+    msg = safe_send(call.message.chat.id,
+                    f"{ce('fire', '🔥')} جاري القياس...",
+                    parse_mode='HTML')
     if msg:
-        safe_edit(call.message.chat.id, msg.message_id, "🚀 السرعة: ممتازة")
+        safe_edit(call.message.chat.id, msg.message_id,
+                  f"{ce('fire', '🚀')} السرعة: ممتازة",
+                  parse_mode='HTML')
 
 
 @bot.callback_query_handler(func=lambda c: c.data == 'about')
 def cb_about(call):
     safe_answer(call.id)
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data='back_to_main'))
+    markup.add(types.InlineKeyboardButton(f"{ce('arrow', '🔙')} رجوع",
+                                           callback_data='back_to_main'))
     safe_send(call.message.chat.id,
-              f"ℹ️ <b>حول البوت</b>\n\n"
-              f"🐍 منصة استضافة Python\n"
-              f"📂 دعم ملفات متعددة\n"
-              f"📞 تفاعل ذكي (رقم/OTP)\n\n"
-              f"👨‍💻 {YOUR_USERNAME}\n📢 {ADMIN_CHANNEL}",
+              f"{ce('bulb', 'ℹ️')} <b>حول البوت</b>\n\n"
+              f"{ce('python', '🐍')} منصة استضافة Python\n"
+              f"{ce('folder', '📂')} دعم ملفات متعددة\n"
+              f"{ce('phone', '📞')} تفاعل ذكي (رقم/OTP)\n\n"
+              f"{ce('crown', '👨‍💻')} {YOUR_USERNAME}\n"
+              f"{ce('link', '📢')} {ADMIN_CHANNEL}",
               reply_markup=markup, parse_mode='HTML')
 
 
@@ -992,12 +1039,21 @@ def cb_about(call):
 def cb_support(call):
     safe_answer(call.id)
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("👨‍💼 المطور",
-                                           url=f"https://t.me/{YOUR_USERNAME.replace('@', '')}"))
-    markup.add(types.InlineKeyboardButton("📢 القناة",
-                                           url=f"https://t.me/{ADMIN_CHANNEL.replace('@', '')}"))
-    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data='back_to_main'))
-    safe_send(call.message.chat.id, f"📞 الدعم: {YOUR_USERNAME}", reply_markup=markup)
+    markup.add(types.InlineKeyboardButton(
+        f"{ce('people', '👨‍💼')} المطور",
+        url=f"https://t.me/{YOUR_USERNAME.replace('@', '')}"
+    ))
+    markup.add(types.InlineKeyboardButton(
+        f"{ce('link', '📢')} القناة",
+        url=f"https://t.me/{ADMIN_CHANNEL.replace('@', '')}"
+    ))
+    markup.add(types.InlineKeyboardButton(
+        f"{ce('arrow', '🔙')} رجوع",
+        callback_data='back_to_main'
+    ))
+    safe_send(call.message.chat.id,
+              f"{ce('bell', '📞')} الدعم: {YOUR_USERNAME}",
+              reply_markup=markup, parse_mode='HTML')
 
 
 @bot.callback_query_handler(func=lambda c: c.data == 'install_lib')
@@ -1008,7 +1064,8 @@ def cb_install(call):
     safe_answer(call.id)
     waiting_library.add(call.message.chat.id)
     safe_send(call.message.chat.id,
-              "📚 أرسل اسم المكتبة:\n\nأمثلة: <code>pyrogram</code> - <code>telethon</code>",
+              f"{ce('pencil', '📚')} أرسل اسم المكتبة:\n\n"
+              f"أمثلة: <code>pyrogram</code> - <code>telethon</code>",
               parse_mode='HTML')
 
 
@@ -1019,14 +1076,17 @@ def cb_protection(call):
         return
     markup = types.InlineKeyboardMarkup()
     if protection_enabled:
-        markup.add(types.InlineKeyboardButton("تعطيل", callback_data='prot_off'))
+        markup.add(types.InlineKeyboardButton(f"{ce('cross', '❌')} تعطيل",
+                                               callback_data='prot_off'))
     else:
-        markup.add(types.InlineKeyboardButton("تفعيل", callback_data='prot_on'))
-    markup.add(types.InlineKeyboardButton("🔙", callback_data='back_to_main'))
+        markup.add(types.InlineKeyboardButton(f"{ce('check', '✅')} تفعيل",
+                                               callback_data='prot_on'))
+    markup.add(types.InlineKeyboardButton(f"{ce('arrow', '🔙')} رجوع",
+                                           callback_data='back_to_main'))
     safe_answer(call.id)
     safe_edit(call.message.chat.id, call.message.message_id,
-              f"🛡️ الحماية: {'✅' if protection_enabled else '❌'}",
-              reply_markup=markup)
+              f"{ce('shield', '🛡️')} الحماية: {'✅' if protection_enabled else '❌'}",
+              reply_markup=markup, parse_mode='HTML')
 
 
 @bot.callback_query_handler(func=lambda c: c.data in ['prot_on', 'prot_off'])
@@ -1046,14 +1106,17 @@ def cb_bot_status(call):
         return
     markup = types.InlineKeyboardMarkup()
     if bot_running:
-        markup.add(types.InlineKeyboardButton("🛑 إيقاف", callback_data='bot_off'))
+        markup.add(types.InlineKeyboardButton(f"{ce('stop', '🛑')} إيقاف",
+                                               callback_data='bot_off'))
     else:
-        markup.add(types.InlineKeyboardButton("⚡ تشغيل", callback_data='bot_on'))
-    markup.add(types.InlineKeyboardButton("🔙", callback_data='back_to_main'))
+        markup.add(types.InlineKeyboardButton(f"{ce('check', '⚡')} تشغيل",
+                                               callback_data='bot_on'))
+    markup.add(types.InlineKeyboardButton(f"{ce('arrow', '🔙')} رجوع",
+                                           callback_data='back_to_main'))
     safe_answer(call.id)
     safe_edit(call.message.chat.id, call.message.message_id,
-              f"⚡ البوت: {'✅ يعمل' if bot_running else '⏸️ متوقف'}",
-              reply_markup=markup)
+              f"{ce('crown', '⚡')} البوت: {'✅ يعمل' if bot_running else '⏸️ متوقف'}",
+              reply_markup=markup, parse_mode='HTML')
 
 
 @bot.callback_query_handler(func=lambda c: c.data in ['bot_on', 'bot_off'])
@@ -1079,14 +1142,16 @@ def cb_users(call):
     for uid, fname, uname in pending:
         fn = (fname or 'مستخدم')[:15]
         markup.row(
-            types.InlineKeyboardButton(f"✅ {fn}", callback_data=f'ap_{uid}'),
-            types.InlineKeyboardButton(f"❌ {fn}", callback_data=f'rj_{uid}')
+            types.InlineKeyboardButton(f"{ce('check', '✅')} {fn}", callback_data=f'ap_{uid}'),
+            types.InlineKeyboardButton(f"{ce('cross', '❌')} {fn}", callback_data=f'rj_{uid}')
         )
-    markup.add(types.InlineKeyboardButton("🔙", callback_data='back_to_main'))
+    markup.add(types.InlineKeyboardButton(f"{ce('arrow', '🔙')} رجوع",
+                                           callback_data='back_to_main'))
     safe_answer(call.id)
     safe_edit(call.message.chat.id, call.message.message_id,
-              f"👥 المعتمدون: {a}\n⏳ الانتظار: {p}",
-              reply_markup=markup)
+              f"{ce('people', '👥')} المعتمدون: {a}\n"
+              f"{ce('bell', '⏳')} الانتظار: {p}",
+              reply_markup=markup, parse_mode='HTML')
 
 
 @bot.callback_query_handler(func=lambda c: c.data.startswith('ap_'))
@@ -1098,7 +1163,8 @@ def cb_approve(call):
         add_approved(uid, 'USER')
         safe_answer(call.id, "✅")
         try:
-            bot.send_message(uid, "🎉 تمت الموافقة! أرسل /start")
+            bot.send_message(uid, f"{ce('sparkles', '🎉')} تمت الموافقة! أرسل /start",
+                             parse_mode='HTML')
         except:
             pass
     except:
@@ -1175,7 +1241,7 @@ except:
 
 
 # ============================================================
-# التشغيل الرئيسي
+# التشغيل
 # ============================================================
 if __name__ == "__main__":
     print("=" * 55)
