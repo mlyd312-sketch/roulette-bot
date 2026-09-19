@@ -314,6 +314,7 @@ TARGETS_SPECIFIC = [
     r'please\s+enter\s+your\s+phone',
     r'please\s+enter\s+the\s+code',
     r'please\s+enter\s+your\s+password',
+    r'password\s+input\s+may\s+be\s+echoed',
 ]
 
 
@@ -323,7 +324,10 @@ def looks_prompt(text):
   t = text.strip()
   if len(t) < 4 or len(t) > 250:
     return False
-  t_lower = t.lower()
+
+  # إهمال رسالة التحذير الشفافة لتجنب الازداوجية
+  if 'password input may be echoed' in t.lower():
+    return False
 
   for p in TARGETS_SPECIFIC:
     if re.search(p, t, re.IGNORECASE):
@@ -698,10 +702,8 @@ def handle_input(message):
     return
 
   proc = active_processes[chat_id][file_id].get('process')
-
   user_input = (message.text or '').strip()
 
-  # تنظيف وإصلاح كتابة الرقم تلقائياً بإضافة (+) إذا نسيه المستخدم
   if re.match(r'^\d{10,14}$', user_input) and not user_input.startswith('+'):
     user_input = '+' + user_input
 
@@ -712,7 +714,7 @@ def handle_input(message):
       bot.reply_to(message, 'تم إرسال الرد إلى الملف. ✅')
 
     pending_inputs.pop(chat_id, None)
-  except:
+  except Exception:
     pending_inputs.pop(chat_id, None)
 
 
