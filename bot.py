@@ -19,7 +19,7 @@ import telebot
 from telebot import types
 
 # ============================================================
-# ✅ إعدادات Timeouts (حل مشكلة ReadTimeout على Railway والاستضافات)
+# ✅ إعدادات Timeouts (حل مشكلة ReadTimeout والاتصال)
 # ============================================================
 telebot.apihelper.CONNECT_TIMEOUT = 90
 telebot.apihelper.READ_TIMEOUT = 90
@@ -170,16 +170,11 @@ waiting_library = set()
 
 last_prompt_sent = {}
 
-# ============================================================
-# كلمات مفتاحية فقط لطلبات الإدخال الحقيقية
-# ============================================================
 PROMPT_KEYWORDS = [
-    # عربي
     'أرسل رمز', 'ارسل رمز', 'أرسل كود', 'ارسل كود', 'أرسل رقم', 'ارسل رقم',
     'أدخل رمز', 'أدخل كود', 'ادخل الرمز', 'ادخل الكود', 'أدخل رقم', 'ادخل رقم',
     'رقم الهاتف', 'الرجاء إدخال', 'رمز التحقق', 'كود التحقق', 'كلمة سر', 'كلمة المرور',
     'التحقق بخطوتين', 'بخطوتين',
-    # إنجليزي
     'enter the phone', 'enter phone', 'phone number',
     'enter code', 'enter the code', 'enter the verification',
     'enter password', 'enter your password',
@@ -187,9 +182,7 @@ PROMPT_KEYWORDS = [
     'please enter', 'enter your'
 ]
 
-
 def looks_prompt(text):
-    """يكتشف فقط طلبات الإدخال الحقيقية (رقم/كود/تحقق)"""
     if not text or len(text.strip()) < 3:
         return False
     t = text.lower()
@@ -307,7 +300,6 @@ def monitor_output(chat_id, file_id, process):
         return t.strip()[:200]
 
     def _send_prompt(line):
-        """إرسال طلب إدخال مرة واحدة فقط خلال 60 ثانية"""
         prev_text, prev_time = last_prompt_sent.get(file_id, ("", 0))
         now = time.time()
         normalized = _normalize(line)
@@ -348,7 +340,6 @@ def monitor_output(chat_id, file_id, process):
         if set(line) <= {'.', '!', '-', '_', ' ', '*', '=', '~'}:
             return
 
-        # ✅ فقط طلبات الإدخال — الأخطاء تُتجاهل تماماً
         if looks_prompt(line):
             _send_prompt(line)
 
@@ -678,85 +669,217 @@ def handle_doc(message):
             pass
 
 # ============================================================
-# أزرار التحكم
+# أزرار التحكم المعدلة 100% بدون تعليق
 # ============================================================
-@bot.callback_query_handler(func=lambda c: c.data.startswith('sf_'))
-def cb_stop(call):
-    fid = call.data.replace('sf_', '')
-    cid = call.message.chat.id
-    if cid not in active_processes or fid not in active_processes[cid]:
-        bot.answer_callback_query(call.id, "❌ الملف غير موجود")
-        return
-    stop_one(cid, fid, delete=False)
-    bot.answer_callback_query(call.id, "✅ تم إيقاف الملف")
-    show_files(call, edit=True)
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith('rf_'))
-def cb_restart(call):
-    fid = call.data.replace('rf_', '')
-    cid = call.message.chat.id
-    if cid not in active_processes or fid not in active_processes[cid]:
-        bot.answer_callback_query(call.id, "❌ الملف غير موجود")
-        return
-    info = active_processes[cid][fid]
-    stop_one(cid, fid, delete=False)
-    time.sleep(0.3)
-    start_file(info['path'], cid, fid)
-    bot.answer_callback_query(call.id, "🔄 تم إعادة التشغيل")
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith('df_'))
-def cb_delete(call):
-    fid = call.data.replace('df_', '')
-    cid = call.message.chat.id
-    if cid not in active_processes or fid not in active_processes[cid]:
-        bot.answer_callback_query(call.id, "❌ الملف غير موجود")
-        return
-    stop_one(cid, fid, delete=True)
-    bot.answer_callback_query(call.id, "🗑️ تم حذف الملف")
-    show_files(call, edit=True)
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith('ci_'))
-def cb_cancel_input(call):
-    pending_inputs.pop(call.message.chat.id, None)
-    bot.answer_callback_query(call.id, "✅ تم إلغاء الطلب")
+@bot.callback_query_handler(func=lambda c: True)
+def global_callback_handler(call):
+    # إنهاء دائرة الانتظار فوراً لكل الضغطات
     try:
-        bot.edit_message_text("🚫 تم إلغاء طلب الإدخال.", call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id)
     except Exception:
         pass
 
-@bot.callback_query_handler(func=lambda c: c.data.startswith('nf_'))
-def cb_info(call):
-    fid = call.data.replace('nf_', '')
+    data = call.data
     cid = call.message.chat.id
-    if cid not in active_processes or fid not in active_processes[cid]:
-        bot.answer_callback_query(call.id, "❌")
-        return
-    info = active_processes[cid][fid]
-    proc = info.get('process')
-    status = "🟢 يعمل" if (proc and proc.poll() is None) else "🔴 متوقف"
-    pid = proc.pid if (proc and proc.poll() is None) else "—"
-    bot.answer_callback_query(
-        call.id,
-        f"📁 {info['name']}\n{status}\nPID: {pid}\n🆔 {fid}\n⏰ {info.get('started_at', '—')}",
-        show_alert=True
-    )
+    uid = call.from_user.id
 
-@bot.callback_query_handler(func=lambda c: c.data == 'stop_all')
-def cb_stop_all(call):
-    cid = call.message.chat.id
-    if cid not in active_processes:
-        bot.answer_callback_query(call.id, "لا توجد ملفات")
-        return
-    count = 0
-    for fid in list(active_processes[cid].keys()):
-        if stop_one(cid, fid, delete=False):
-            count += 1
-    bot.answer_callback_query(call.id, f"🛑 تم إيقاف {count} ملفات")
-    show_files(call, edit=True)
+    if data.startswith('sf_'):
+        fid = data.replace('sf_', '')
+        if cid not in active_processes or fid not in active_processes[cid]:
+            return
+        stop_one(cid, fid, delete=False)
+        show_files(call, edit=True)
 
-@bot.callback_query_handler(func=lambda c: c.data == 'my_files')
-def cb_my_files(call):
-    show_files(call, edit=False)
+    elif data.startswith('rf_'):
+        fid = data.replace('rf_', '')
+        if cid not in active_processes or fid not in active_processes[cid]:
+            return
+        info = active_processes[cid][fid]
+        stop_one(cid, fid, delete=False)
+        time.sleep(0.3)
+        start_file(info['path'], cid, fid)
+
+    elif data.startswith('df_'):
+        fid = data.replace('df_', '')
+        if cid not in active_processes or fid not in active_processes[cid]:
+            return
+        stop_one(cid, fid, delete=True)
+        show_files(call, edit=True)
+
+    elif data.startswith('ci_'):
+        pending_inputs.pop(cid, None)
+        try:
+            bot.edit_message_text("🚫 تم إلغاء طلب الإدخال.", cid, call.message.message_id)
+        except Exception:
+            pass
+
+    elif data.startswith('nf_'):
+        fid = data.replace('nf_', '')
+        if cid not in active_processes or fid not in active_processes[cid]:
+            return
+        info = active_processes[cid][fid]
+        proc = info.get('process')
+        status = "🟢 يعمل" if (proc and proc.poll() is None) else "🔴 متوقف"
+        pid = proc.pid if (proc and proc.poll() is None) else "—"
+        try:
+            bot.answer_callback_query(
+                call.id,
+                f"📁 {info['name']}\n{status}\nPID: {pid}\n🆔 {fid}\n⏰ {info.get('started_at', '—')}",
+                show_alert=True
+            )
+        except Exception:
+            pass
+
+    elif data == 'stop_all':
+        if cid not in active_processes:
+            return
+        for fid in list(active_processes[cid].keys()):
+            stop_one(cid, fid, delete=False)
+        show_files(call, edit=True)
+
+    elif data == 'my_files':
+        show_files(call, edit=False)
+
+    elif data == 'back':
+        show_menu(call.message)
+
+    elif data == 'upload':
+        if not is_approved(uid):
+            return
+        try:
+            bot.send_message(cid, f"📥 <b>أرسل ملف .py الآن</b>", parse_mode='HTML')
+        except Exception:
+            pass
+
+    elif data == 'speed':
+        try:
+            bot.send_message(cid, "🚀 سرعة الاستجابة ممتازة ومتصلة 100%.")
+        except Exception:
+            pass
+
+    elif data == 'about':
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data='back'))
+        try:
+            bot.send_message(cid, f"ℹ️ <b>حول البوت</b>\n\nمنصة استضافة وتشغيل ملفات بايثون.\n👨‍💻 المطور: {YOUR_USERNAME}", reply_markup=markup, parse_mode='HTML')
+        except Exception:
+            pass
+
+    elif data in ['support', 'tech_support', 'support_girl']:
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("👨‍💼 المطور", url=f"https://t.me/{YOUR_USERNAME.replace('@', '')}"))
+        markup.add(types.InlineKeyboardButton("📢 القناة", url=f"https://t.me/{ADMIN_CHANNEL.replace('@', '')}"))
+        markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data='back'))
+        try:
+            bot.send_message(cid, f"📞 للتواصل مع الدعم الفني:", reply_markup=markup)
+        except Exception:
+            pass
+
+    elif data == 'install_lib':
+        if not is_approved(uid):
+            return
+        waiting_library.add(cid)
+        try:
+            bot.send_message(cid, "📚 أرسل اسم المكتبة المراد تثبيتها:\nمثال: <code>telethon</code> أو <code>pyrogram</code>", parse_mode='HTML')
+        except Exception:
+            pass
+
+    elif data == 'protection':
+        global protection_enabled
+        if not is_admin(uid):
+            return
+        markup = types.InlineKeyboardMarkup()
+        if protection_enabled:
+            markup.add(types.InlineKeyboardButton("تعطيل الحماية", callback_data='prot_off'))
+        else:
+            markup.add(types.InlineKeyboardButton("تفعيل الحماية", callback_data='prot_on'))
+        markup.add(types.InlineKeyboardButton("🔙", callback_data='back'))
+        try:
+            bot.edit_message_text(f"🛡️ حماية الملفات: {'✅ مفعلة' if protection_enabled else '❌ معطلة تماماً'}", cid, call.message.message_id, reply_markup=markup)
+        except Exception:
+            pass
+
+    elif data in ['prot_on', 'prot_off']:
+        global protection_enabled
+        if not is_admin(uid):
+            return
+        protection_enabled = (data == 'prot_on')
+        markup = types.InlineKeyboardMarkup()
+        if protection_enabled:
+            markup.add(types.InlineKeyboardButton("تعطيل الحماية", callback_data='prot_off'))
+        else:
+            markup.add(types.InlineKeyboardButton("تفعيل الحماية", callback_data='prot_on'))
+        markup.add(types.InlineKeyboardButton("🔙", callback_data='back'))
+        try:
+            bot.edit_message_text(f"🛡️ حماية الملفات: {'✅ مفعلة' if protection_enabled else '❌ معطلة تماماً'}", cid, call.message.message_id, reply_markup=markup)
+        except Exception:
+            pass
+
+    elif data == 'bot_status':
+        global bot_running
+        if not is_admin(uid):
+            return
+        markup = types.InlineKeyboardMarkup()
+        if bot_running:
+            markup.add(types.InlineKeyboardButton("إيقاف البوت", callback_data='bot_off'))
+        else:
+            markup.add(types.InlineKeyboardButton("تشغيل البوت", callback_data='bot_on'))
+        markup.add(types.InlineKeyboardButton("🔙", callback_data='back'))
+        try:
+            bot.edit_message_text(f"⚡ حالة البوت: {'✅ يعمل' if bot_running else '⏸️ متوقف'}", cid, call.message.message_id, reply_markup=markup)
+        except Exception:
+            pass
+
+    elif data in ['bot_on', 'bot_off']:
+        global bot_running
+        if not is_admin(uid):
+            return
+        bot_running = (data == 'bot_on')
+        markup = types.InlineKeyboardMarkup()
+        if bot_running:
+            markup.add(types.InlineKeyboardButton("إيقاف البوت", callback_data='bot_off'))
+        else:
+            markup.add(types.InlineKeyboardButton("تشغيل البوت", callback_data='bot_on'))
+        markup.add(types.InlineKeyboardButton("🔙", callback_data='back'))
+        try:
+            bot.edit_message_text(f"⚡ حالة البوت: {'✅ يعمل' if bot_running else '⏸️ متوقف'}", cid, call.message.message_id, reply_markup=markup)
+        except Exception:
+            pass
+
+    elif data == 'users':
+        if not is_admin(uid):
+            return
+        a, p = get_stats()
+        pending = get_pending()
+        markup = types.InlineKeyboardMarkup()
+        for p_uid, fname, uname in pending:
+            fn = (fname or 'مستخدم')[:15]
+            markup.row(
+                types.InlineKeyboardButton(f"✅ {fn}", callback_data=f'ap_{p_uid}'),
+                types.InlineKeyboardButton(f"❌ {fn}", callback_data=f'rj_{p_uid}')
+            )
+        markup.add(types.InlineKeyboardButton("🔙", callback_data='back'))
+        try:
+            bot.edit_message_text(f"👥 المعتمدون: {a}\n⏳ الانتظار: {p}", cid, call.message.message_id, reply_markup=markup)
+        except Exception:
+            pass
+
+    elif data.startswith('ap_'):
+        if not is_admin(uid):
+            return
+        p_uid = int(data.split('_')[1])
+        add_approved(p_uid, 'USER')
+        try:
+            bot.send_message(p_uid, "🎉 تمت الموافقة على طلبك! أرسل /start للبدء.")
+        except Exception:
+            pass
+
+    elif data.startswith('rj_'):
+        if not is_admin(uid):
+            return
+        p_uid = int(data.split('_')[1])
+        remove_pending(p_uid)
 
 def show_files(call, edit=False):
     cid = call.message.chat.id
@@ -809,159 +932,8 @@ def show_files(call, edit=False):
         except Exception:
             pass
 
-@bot.callback_query_handler(func=lambda c: c.data == 'back')
-def cb_back(call):
-    bot.answer_callback_query(call.id)
-    show_menu(call.message)
-
-@bot.callback_query_handler(func=lambda c: c.data == 'upload')
-def cb_upload(call):
-    if not is_approved(call.from_user.id):
-        bot.answer_callback_query(call.id, "❌")
-        return
-    bot.answer_callback_query(call.id)
-    try:
-        bot.send_message(call.message.chat.id, f"📥 <b>أرسل ملف .py الآن</b>", parse_mode='HTML')
-    except Exception:
-        pass
-
-@bot.callback_query_handler(func=lambda c: c.data == 'speed')
-def cb_speed(call):
-    bot.answer_callback_query(call.id)
-    try:
-        bot.send_message(call.message.chat.id, "🚀 سرعة الاستجابة ممتازة ومتصلة 100%.")
-    except Exception:
-        pass
-
-@bot.callback_query_handler(func=lambda c: c.data == 'about')
-def cb_about(call):
-    bot.answer_callback_query(call.id)
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data='back'))
-    try:
-        bot.send_message(call.message.chat.id, f"ℹ️ <b>حول البوت</b>\n\nمنصة استضافة وتشغيل ملفات بايثون.\n👨‍💻 المطور: {YOUR_USERNAME}", reply_markup=markup, parse_mode='HTML')
-    except Exception:
-        pass
-
-@bot.callback_query_handler(func=lambda c: c.data in ['support', 'tech_support', 'support_girl'])
-def cb_support(call):
-    bot.answer_callback_query(call.id)
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("👨‍💼 المطور", url=f"https://t.me/{YOUR_USERNAME.replace('@', '')}"))
-    markup.add(types.InlineKeyboardButton("📢 القناة", url=f"https://t.me/{ADMIN_CHANNEL.replace('@', '')}"))
-    markup.add(types.InlineKeyboardButton("🔙 رجوع", callback_data='back'))
-    try:
-        bot.send_message(call.message.chat.id, f"📞 للتواصل مع الدعم الفني:", reply_markup=markup)
-    except Exception:
-        pass
-
-@bot.callback_query_handler(func=lambda c: c.data == 'install_lib')
-def cb_install(call):
-    if not is_approved(call.from_user.id):
-        bot.answer_callback_query(call.id, "❌")
-        return
-    bot.answer_callback_query(call.id)
-    waiting_library.add(call.message.chat.id)
-    try:
-        bot.send_message(call.message.chat.id, "📚 أرسل اسم المكتبة المراد تثبيتها:\nمثال: <code>telethon</code> أو <code>pyrogram</code>", parse_mode='HTML')
-    except Exception:
-        pass
-
-@bot.callback_query_handler(func=lambda c: c.data == 'protection')
-def cb_protection(call):
-    global protection_enabled
-    if not is_admin(call.from_user.id):
-        bot.answer_callback_query(call.id, "❌")
-        return
-    markup = types.InlineKeyboardMarkup()
-    if protection_enabled:
-        markup.add(types.InlineKeyboardButton("تعطيل الحماية", callback_data='prot_off'))
-    else:
-        markup.add(types.InlineKeyboardButton("تفعيل الحماية", callback_data='prot_on'))
-    markup.add(types.InlineKeyboardButton("🔙", callback_data='back'))
-    bot.answer_callback_query(call.id)
-    try:
-        bot.edit_message_text(f"🛡️ حماية الملفات: {'✅ مفعلة' if protection_enabled else '❌ معطلة تماماً'}", call.message.chat.id, call.message.message_id, reply_markup=markup)
-    except Exception:
-        pass
-
-@bot.callback_query_handler(func=lambda c: c.data in ['prot_on', 'prot_off'])
-def cb_prot_toggle(call):
-    global protection_enabled
-    if not is_admin(call.from_user.id):
-        return
-    protection_enabled = (call.data == 'prot_on')
-    bot.answer_callback_query(call.id, "✅ تم التغيير")
-    cb_protection(call)
-
-@bot.callback_query_handler(func=lambda c: c.data == 'bot_status')
-def cb_bot_status(call):
-    if not is_admin(call.from_user.id):
-        bot.answer_callback_query(call.id, "❌")
-        return
-    markup = types.InlineKeyboardMarkup()
-    if bot_running:
-        markup.add(types.InlineKeyboardButton("إيقاف البوت", callback_data='bot_off'))
-    else:
-        markup.add(types.InlineKeyboardButton("تشغيل البوت", callback_data='bot_on'))
-    markup.add(types.InlineKeyboardButton("🔙", callback_data='back'))
-    bot.answer_callback_query(call.id)
-    try:
-        bot.edit_message_text(f"⚡ حالة البوت: {'✅ يعمل' if bot_running else '⏸️ متوقف'}", call.message.chat.id, call.message.message_id, reply_markup=markup)
-    except Exception:
-        pass
-
-@bot.callback_query_handler(func=lambda c: c.data in ['bot_on', 'bot_off'])
-def cb_bot_toggle(call):
-    global bot_running
-    if not is_admin(call.from_user.id):
-        return
-    bot_running = (call.data == 'bot_on')
-    bot.answer_callback_query(call.id, "✅")
-    cb_bot_status(call)
-
-@bot.callback_query_handler(func=lambda c: c.data == 'users')
-def cb_users(call):
-    if not is_admin(call.from_user.id):
-        return
-    a, p = get_stats()
-    pending = get_pending()
-    markup = types.InlineKeyboardMarkup()
-    for uid, fname, uname in pending:
-        fn = (fname or 'مستخدم')[:15]
-        markup.row(
-            types.InlineKeyboardButton(f"✅ {fn}", callback_data=f'ap_{uid}'),
-            types.InlineKeyboardButton(f"❌ {fn}", callback_data=f'rj_{uid}')
-        )
-    markup.add(types.InlineKeyboardButton("🔙", callback_data='back'))
-    bot.answer_callback_query(call.id)
-    try:
-        bot.edit_message_text(f"👥 المعتمدون: {a}\n⏳ الانتظار: {p}", call.message.chat.id, call.message.message_id, reply_markup=markup)
-    except Exception:
-        pass
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith('ap_'))
-def cb_approve(call):
-    if not is_admin(call.from_user.id):
-        return
-    uid = int(call.data.split('_')[1])
-    add_approved(uid, 'USER')
-    bot.answer_callback_query(call.id, "✅ تمت الموافقة")
-    try:
-        bot.send_message(uid, "🎉 تمت الموافقة على طلبك! أرسل /start للبدء.")
-    except Exception:
-        pass
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith('rj_'))
-def cb_reject(call):
-    if not is_admin(call.from_user.id):
-        return
-    uid = int(call.data.split('_')[1])
-    remove_pending(uid)
-    bot.answer_callback_query(call.id, "❌ تم الرفض")
-
 # ============================================================
-# التشغيل
+# التشغيل المستمر
 # ============================================================
 if __name__ == '__main__':
     logging.info("=" * 55)
@@ -975,7 +947,6 @@ if __name__ == '__main__':
     except Exception as e:
         logging.warning(f"⚠️ remove_webhook: {e}")
 
-    # حلقة تشغيل متطورة وغير قابلة للتوقف
     while True:
         try:
             bot.polling(
