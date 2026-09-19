@@ -193,19 +193,16 @@ prompt_tracker = {}
 # ============================================================
 # ✅ الفلتر النهائي — دقيق جداً
 # ============================================================
-# الأفعال (إلزامية مع الكلمات العامة)
 VERBS_AR = [r'أرسل', r'ارسل', r'أدخل', r'ادخل', r'اكتب', r'قم\s+بإرسال',
             r'قم\s+بإدخال', r'الرجاء\s+إدخال', r'الرجاء\s+ادخال',
             r'من\s+فضلك\s+أرسل', r'من\s+فضلك\s+ارسل']
 VERBS_EN = [r'\benter\b', r'\binput\b', r'\bsend\b', r'\bprovide\b',
             r'\btype\b', r'please\s+enter', r'please\s+send', r'please\s+provide']
 
-# الكلمات العامة (تحتاج فعل)
 TARGETS_GENERAL = [r'\bرقم\b', r'\bكود\b', r'\bرمز\b', r'\bهاتف\b',
                    r'\bphone\b', r'\bnumber\b', r'\bcode\b', r'\botp\b',
                    r'\bpassword\b', r'\bpass\b']
 
-# الأنماط الصريحة (تعمل لحالها)
 TARGETS_SPECIFIC = [
     r'رقم\s+الهاتف', r'رقم\s+هاتف', r'كود\s+التحقق', r'رمز\s+التحقق',
     r'كلمة\s+السر', r'كلمة\s+المرور',
@@ -216,7 +213,6 @@ TARGETS_SPECIFIC = [
     r'session\s+string', r'string\s+session',
 ]
 
-# ❌ كلمات تعني إن السطر ليس طلب إدخال
 FALSE_POSITIVES = [
     'traceback', 'error', 'exception', 'warning', 'failed', 'fail',
     'success', 'connected', 'connection', 'loading', 'loaded',
@@ -232,60 +228,33 @@ FALSE_POSITIVES = [
     'connection lost', 'connection failed', 'run ok', 'ready to',
 ]
 
-
 def looks_prompt(text):
-    """
-    ✅ فلتر دقيق:
-    1) يستبعد أسطر السجل (timestamps, INFO/WARNING)
-    2) يستبعد الجمل الطويلة
-    3) يطلب (فعل + كلمة عامة) أو نمط صريح
-    """
-    if not text:
-        return False
-
+    if not text: return False
     t = text.strip()
-
-    # طول معقول
-    if len(t) < 4 or len(t) > 200:
-        return False
-
+    if len(t) < 4 or len(t) > 200: return False
     t_lower = t.lower()
 
-    # ❌ 1) استبعاد أسطر السجل (timestamp)
-    if re.match(r'^\d{2}:\d{2}', t):
-        return False
-    if re.match(r'^\d{4}[-/]\d{2}', t):
-        return False
+    if re.match(r'^\d{2}:\d{2}', t): return False
+    if re.match(r'^\d{4}[-/]\d{2}', t): return False
 
-    # ❌ 2) استبعاد مستويات السجل
     log_markers = [
         ' - info - ', ' - warning - ', ' - debug - ', ' - error - ',
         ' - critical - ', '::info', '::warning', '::debug', '::error',
         '[info]', '[warning]', '[debug]', '[error]',
     ]
     for lm in log_markers:
-        if lm in t_lower:
-            return False
+        if lm in t_lower: return False
 
-    # ❌ 3) استبعاد الكلمات السلبية
     for fp in FALSE_POSITIVES:
-        if fp in t_lower:
-            return False
+        if fp in t_lower: return False
 
-    # ✅ 4) نمط صريح (يعمل بدون فعل)
     for p in TARGETS_SPECIFIC:
-        if re.search(p, t, re.IGNORECASE):
-            return True
+        if re.search(p, t, re.IGNORECASE): return True
 
-    # ✅ 5) فعل + كلمة عامة
     has_verb = any(re.search(v, t, re.IGNORECASE) for v in (VERBS_AR + VERBS_EN))
     has_target = any(re.search(tg, t, re.IGNORECASE) for tg in TARGETS_GENERAL)
 
-    if has_verb and has_target:
-        return True
-
-    return False
-
+    return has_verb and has_target
 
 # ============================================================
 # فلتر الأخطاء
@@ -309,7 +278,6 @@ IGNORE_SIGS = [
     'requests.exceptions', 'asyncio', 'runtimewarning',
 ]
 
-
 def is_real_error(text):
     if not text: return False
     t = text.lower().strip()
@@ -319,7 +287,6 @@ def is_real_error(text):
     for sig in REAL_ERRORS:
         if sig in t: return True
     return False
-
 
 def send_error_once(chat_id, file_id, error_text):
     now = time.time()
@@ -336,7 +303,6 @@ def send_error_once(chat_id, file_id, error_text):
     safe_send(chat_id, f"⚠️ <b>خطأ ({tracker['count']}/10):</b>\n<pre>{eh(error_text[:1200])}</pre>",
               parse_mode='HTML')
 
-
 def send_prompt_once(chat_id, file_id, prompt_text):
     now = time.time()
     if file_id not in prompt_tracker:
@@ -347,7 +313,6 @@ def send_prompt_once(chat_id, file_id, prompt_text):
     tracker['last_prompt'] = prompt_text
     tracker['last_time'] = now
     return True
-
 
 # ============================================================
 # تشغيل/مراقبة/إيقاف
@@ -377,6 +342,7 @@ def start_file(script_path, chat_id, file_id):
             env['PYTHONUNBUFFERED'] = '1'
             env['PYTHONIOENCODING'] = 'utf-8'
             env['PYTHONDONTWRITEBYTECODE'] = '1'
+            env['PYTHONWARNINGS'] = 'ignore'
             p = subprocess.Popen(
                 [sys.executable, "-u", script_path],
                 cwd=work_dir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -402,7 +368,6 @@ def start_file(script_path, chat_id, file_id):
             t.start()
         except Exception as e:
             safe_send(chat_id, f"❌ فشل: {eh(str(e))}", parse_mode='HTML')
-
 
 def monitor_output(chat_id, file_id, process):
     buffer = ""
@@ -475,7 +440,6 @@ def monitor_output(chat_id, file_id, process):
         if pending_inputs.get(chat_id) == file_id:
             pending_inputs.pop(chat_id, None)
 
-
 def stop_one(chat_id, file_id, delete=False):
     if chat_id not in active_processes or file_id not in active_processes[chat_id]:
         return False
@@ -500,7 +464,6 @@ def stop_one(chat_id, file_id, delete=False):
         active_processes[chat_id].pop(file_id, None)
     return True
 
-
 def stop_all_for_chat(chat_id):
     if chat_id not in active_processes:
         return 0
@@ -509,7 +472,6 @@ def stop_all_for_chat(chat_id):
         if stop_one(chat_id, fid, delete=False):
             count += 1
     return count
-
 
 def scan_file(path, uid):
     if is_admin(uid): return False, ""
@@ -521,7 +483,6 @@ def scan_file(path, uid):
                 return True, "نمط مشبوه"
         return False, ""
     except: return False, ""
-
 
 # ============================================================
 # قائمة الملفات
@@ -556,7 +517,6 @@ def show_my_files(call, edit=False):
     else:
         safe_send(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
-
 # ============================================================
 # القائمة الرئيسية
 # ============================================================
@@ -586,7 +546,6 @@ def show_main_menu(message):
               f"📂 تشغيل عدة ملفات\n📨 تفاعل ذكي\n\nاختر الخدمة:",
               reply_markup=markup, parse_mode='HTML')
 
-
 # ============================================================
 # Handlers
 # ============================================================
@@ -615,7 +574,6 @@ def cmd_start(message):
         except: pass
         safe_send(message.chat.id, "⏳ تم إرسال طلبك للأدمن.")
 
-
 @bot.message_handler(
     func=lambda m: (m.chat.id in pending_inputs and m.content_type == 'text'
                     and not (m.text or '').startswith('/')))
@@ -642,7 +600,6 @@ def handle_input(message):
     except:
         safe_send(chat_id, "❌ فشل الإرسال")
 
-
 @bot.message_handler(func=lambda m: m.chat.id in waiting_library and m.content_type == 'text')
 def handle_library_name(message):
     chat_id = message.chat.id
@@ -660,7 +617,6 @@ def handle_library_name(message):
         safe_send(chat_id, msg, parse_mode='HTML')
     executor.submit(install)
 
-
 @bot.message_handler(content_types=['document'])
 def handle_doc(message):
     uid = message.from_user.id
@@ -673,7 +629,10 @@ def handle_doc(message):
     try:
         chat_id = message.chat.id
         doc = message.document
-        file_name = doc.file_name or f"script_{uuid.uuid4().hex[:6]}.py"
+        # ✅ إصلاح أمني: تنظيف اسم الملف لمنع Path Traversal
+        raw_name = doc.file_name or f"script_{uuid.uuid4().hex[:6]}.py"
+        file_name = os.path.basename(raw_name)
+        
         if not file_name.endswith('.py'):
             safe_send(chat_id, "❌ فقط ملفات .py"); return
         if doc.file_size and doc.file_size > MAX_FILE_SIZE:
@@ -701,9 +660,8 @@ def handle_doc(message):
         total = len(active_processes[chat_id])
         start_file(save_path, chat_id, file_id)
         safe_send(chat_id, f"📊 مجموع ملفاتك: <code>{total}</code>", parse_mode='HTML')
-    except:
-        safe_send(message.chat.id, "❌ خطأ في الرفع")
-
+    except Exception as e:
+        safe_send(message.chat.id, f"❌ خطأ في الرفع: {eh(str(e))}", parse_mode='HTML')
 
 # ============================================================
 # أزرار الملفات
@@ -910,7 +868,6 @@ def cmd_broadcast(message):
     except:
         safe_send(message.chat.id, "❌ استخدم: /rck الرسالة")
 
-
 # ============================================================
 # Cleanup
 # ============================================================
@@ -937,13 +894,18 @@ try:
     signal.signal(signal.SIGINT, signal_handler)
 except: pass
 
-
 # ============================================================
 # التشغيل
 # ============================================================
 if __name__ == "__main__":
     print("=" * 55)
     print("🚀 Bot starting...")
+    
+    # ✅ تحذير بخصوص إصدار بايثون
+    if sys.version_info >= (3, 13):
+        print("⚠️ WARNING: Python 3.13 detected. Pyrogram may have compatibility issues!")
+        print("⚠️ Please consider using Python 3.10 or 3.11 for the host environment.")
+    
     print("=" * 55)
 
     auto_install_packages()
