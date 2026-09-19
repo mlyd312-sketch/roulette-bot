@@ -14,6 +14,9 @@ import uuid
 import telebot
 from telebot import types
 
+# ============================================================
+# إيقاف جميع الأخطاء والسجلات المزعجة نهائياً
+# ============================================================
 logging.basicConfig(level=logging.CRITICAL, handlers=[logging.NullHandler()])
 for name in [
     'telebot',
@@ -30,7 +33,7 @@ for name in [
   logging.getLogger(name).propagate = False
 
 # ============================================================
-# الإعدادات
+# الإعدادات الرئيسية
 # ============================================================
 BOT_TOKEN = '8877293036:AAGg_82F0bT1Bhov42sk9qDcRMsVNpfnErw'
 ADMIN_ID = 1920665874
@@ -39,8 +42,8 @@ ADMIN_CHANNEL = '@FD_CQ'
 UPLOADED_FILES_DIR = 'uploaded_files'
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
-# تم تفعيل الأخطاء لمعرفة سبب توقف السكربت إن حدث
-SHOW_ERRORS = True
+# تعطيل إظهار الأخطاء للمستخدم لمنع الإزعاج
+SHOW_ERRORS = False
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True, num_threads=10)
 executor = ThreadPoolExecutor(max_workers=10)
@@ -246,16 +249,15 @@ def get_stats():
 
 
 # ============================================================
-# متغيرات عامة
+# متغيرات ومصفوفات المتابعة
 # ============================================================
 active_processes = {}
 pending_inputs = {}
 waiting_library = set()
-error_tracker = {}
 prompt_tracker = {}
 
 # ============================================================
-# الفلتر الذكي للالتقاط التفاعلي
+# الفلتر التفاعلي
 # ============================================================
 VERBS_AR = [
     r'أرسل',
@@ -300,76 +302,18 @@ TARGETS_SPECIFIC = [
     r'كلمة\s+السر',
     r'كلمة\s+المرور',
     r'التحقق\s+بخطوتين',
-    r'التحقق\s+بخطوتي',
     r'phone\s+number',
     r'verification\s+code',
     r'login\s+code',
     r'auth\s+code',
     r'2fa\s+code',
     r'otp\s+code',
-    r'\bapi_id\b',
-    r'\bapi_hash\b',
-    r'\bbot_token\b',
-    r'session\s+string',
-    r'string\s+session',
     r'enter\s+your\s+phone',
     r'enter\s+the\s+code',
+    r'enter\s+your\s+password',
     r'please\s+enter\s+your\s+phone',
     r'please\s+enter\s+the\s+code',
     r'please\s+enter\s+your\s+password',
-]
-FALSE_POSITIVES = [
-    'traceback',
-    'error',
-    'exception',
-    'warning',
-    'failed',
-    'fail',
-    'success',
-    'connected',
-    'connection',
-    'loading',
-    'loaded',
-    'starting',
-    'started',
-    'ready',
-    'listening',
-    'sending',
-    'file path',
-    'config',
-    'setting',
-    'opening',
-    'closing',
-    'saved',
-    'stored',
-    'checked',
-    'verifying',
-    'checking',
-    'processing',
-    'looking',
-    'searching',
-    'timeout',
-    'retry',
-    'deprecated',
-    'debug',
-    'info:',
-    'warn:',
-    'note:',
-    'auth key exchange',
-    'session initialized',
-    'session created',
-    'session loaded',
-    'session saved',
-    'session file',
-    'key exchange',
-    'initialized',
-    'initializing',
-    'reading',
-    'listening on',
-    'connection established',
-    'connection lost',
-    'connection failed',
-    'run ok',
 ]
 
 
@@ -380,126 +324,14 @@ def looks_prompt(text):
   if len(t) < 4 or len(t) > 250:
     return False
   t_lower = t.lower()
-  if re.match(r'^\d{2}:\d{2}', t):
-    return False
-  if re.match(r'^\d{4}[-/]\d{2}', t):
-    return False
-  for lm in [
-      ' - info - ',
-      ' - warning - ',
-      ' - debug - ',
-      ' - error - ',
-      ' - critical - ',
-      '::info',
-      '::warning',
-      '::debug',
-      '::error',
-      '[info]',
-      '[warning]',
-      '[debug]',
-      '[error]',
-  ]:
-    if lm in t_lower:
-      return False
-  for fp in FALSE_POSITIVES:
-    if fp in t_lower:
-      return False
+
   for p in TARGETS_SPECIFIC:
     if re.search(p, t, re.IGNORECASE):
       return True
+
   has_verb = any(re.search(v, t, re.IGNORECASE) for v in (VERBS_AR + VERBS_EN))
   has_target = any(re.search(tg, t, re.IGNORECASE) for tg in TARGETS_GENERAL)
   return has_verb and has_target
-
-
-# ============================================================
-# فلتر الأخطاء
-# ============================================================
-REAL_ERRORS = [
-    'traceback (most recent call last)',
-    'modulenotfounderror',
-    'syntaxerror',
-    'indentationerror',
-    'nameerror',
-    'typeerror',
-    'valueerror',
-    'keyerror',
-    'attributeerror',
-    'filenotfounderror',
-    'permissionerror',
-    'runtimeerror',
-    'zerodivisionerror',
-    'indexerror',
-    'importerror',
-    'apiidinvalid',
-    'apihashinvalid',
-    'phone_number_invalid',
-    'phonecodeinvalid',
-    'sessionpasswordneeded',
-    'authkeyunregistered',
-    'eoferror',
-]
-IGNORE_SIGS = [
-    'warning',
-    'warn:',
-    'deprecat',
-    'futurewarning',
-    'userwarning',
-    'info:',
-    'debug:',
-    'rate limit',
-    'floodwait',
-    'flood wait',
-    'retry after',
-    'too many requests',
-    'connection reset',
-    'connection error',
-    'persistent timestamp',
-    'read timeout',
-    'connect timeout',
-    'proxyerror',
-    'ssl error',
-    'urllib3',
-    'requests.exceptions',
-    'asyncio',
-    'runtimewarning',
-]
-
-
-def is_real_error(text):
-  if not text:
-    return False
-  t = text.lower().strip()
-  if len(t) < 10:
-    return False
-  for w in IGNORE_SIGS:
-    if w in t:
-      return False
-  for sig in REAL_ERRORS:
-    if sig in t:
-      return True
-  return False
-
-
-def send_error_once(chat_id, file_id, error_text):
-  if not SHOW_ERRORS:
-    return
-  now = time.time()
-  if file_id not in error_tracker:
-    error_tracker[file_id] = {'last_error': '', 'last_time': 0, 'count': 0}
-  tracker = error_tracker[file_id]
-  if tracker['last_error'] == error_text and (now - tracker['last_time']) < 300:
-    return
-  if tracker['count'] >= 10:
-    return
-  tracker['last_error'] = error_text
-  tracker['last_time'] = now
-  tracker['count'] += 1
-  safe_send(
-      chat_id,
-      f"⚠️ <b>خطأ ({tracker['count']}/10):</b>\n<pre>{eh(error_text[:1200])}</pre>",
-      parse_mode='HTML',
-  )
 
 
 def send_prompt_once(chat_id, file_id, prompt_text):
@@ -518,7 +350,7 @@ def send_prompt_once(chat_id, file_id, prompt_text):
 
 
 # ============================================================
-# تشغيل/مراقبة/إيقاف
+# تشغيل ومراقبة وإيقاف السكربتات
 # ============================================================
 def start_file(script_path, chat_id, file_id):
   script_path = os.path.abspath(script_path)
@@ -535,19 +367,20 @@ def start_file(script_path, chat_id, file_id):
     info = active_processes[chat_id][file_id]
     info['path'] = script_path
     proc = info.get('process')
+
     if proc and proc.poll() is None:
       safe_send(chat_id, '⚠️ الملف يعمل بالفعل.')
       return
     if not os.path.exists(script_path):
       safe_send(chat_id, '❌ الملف غير موجود.')
       return
+
     try:
       work_dir = os.path.dirname(script_path)
       env = os.environ.copy()
       env['PYTHONUNBUFFERED'] = '1'
       env['PYTHONIOENCODING'] = 'utf-8'
-      env['PYTHONDONTWRITEBYTECODE'] = '1'
-      env['PYTHONWARNINGS'] = 'ignore'
+
       p = subprocess.Popen(
           [sys.executable, '-u', script_path],
           cwd=work_dir,
@@ -560,8 +393,8 @@ def start_file(script_path, chat_id, file_id):
       )
       info['process'] = p
       info['started_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-      error_tracker[file_id] = {'last_error': '', 'last_time': 0, 'count': 0}
       prompt_tracker[file_id] = {'last_prompt': '', 'last_time': 0}
+
       markup = types.InlineKeyboardMarkup(row_width=3)
       markup.add(
           types.InlineKeyboardButton(
@@ -580,6 +413,7 @@ def start_file(script_path, chat_id, file_id):
               callback_data='my_files',
           )
       )
+
       safe_send(
           chat_id,
           f"✅ <b>تم تشغيل الملف</b>\n📁 <code>{eh(info['name'])}</code>\n🆔"
@@ -591,69 +425,39 @@ def start_file(script_path, chat_id, file_id):
           target=monitor_output, args=(chat_id, file_id, p), daemon=True
       ).start()
     except Exception as e:
-      safe_send(chat_id, f'❌ فشل: {eh(str(e))}', parse_mode='HTML')
+      safe_send(chat_id, f'❌ فشل التشغيل: {eh(str(e))}', parse_mode='HTML')
 
 
 def monitor_output(chat_id, file_id, process):
   buffer = ''
-  traceback_buffer = []
   try:
     while True:
-      try:
-        ch = process.stdout.read(1)
-      except:
-        break
+      ch = process.stdout.read(1)
       if not ch:
         if process.poll() is not None:
-          if traceback_buffer:
-            full_error = '\n'.join(traceback_buffer)
-            if is_real_error(full_error):
-              send_error_once(chat_id, file_id, full_error)
-            traceback_buffer = []
-          exit_code = process.poll()
-          if exit_code != 0 and SHOW_ERRORS:
-            safe_send(
-                chat_id,
-                f'❌ <b>توقف الملف بكود كود: {exit_code}</b>',
-                parse_mode='HTML',
-            )
-          elif exit_code == 0:
-            safe_send(chat_id, '✅ <b>انتهى الملف بنجاح</b>', parse_mode='HTML')
           break
-        time.sleep(0.03)
+        time.sleep(0.02)
         continue
-      try:
-        decoded = ch.decode('utf-8', errors='replace')
-      except:
-        continue
+
+      decoded = ch.decode('utf-8', errors='replace')
       buffer += decoded
+
       flush = False
       if '\n' in decoded:
         flush = True
-      elif decoded in ('؟', '?', ':', '!', '؛', '،') and len(
-          buffer.strip()
-      ) >= 4:
+      elif decoded in ('؟', '?', ':', '!', '؛') and len(buffer.strip()) >= 3:
         flush = True
+
       if not flush:
         continue
+
       line = buffer.strip()
       buffer = ''
+
       if not line:
         continue
-      if 'traceback (most recent call last)' in line.lower():
-        traceback_buffer = [line]
-        continue
-      if traceback_buffer:
-        traceback_buffer.append(line)
-        if len(traceback_buffer) >= 8:
-          full_error = '\n'.join(traceback_buffer)
-          if is_real_error(full_error):
-            send_error_once(chat_id, file_id, full_error)
-          traceback_buffer = []
-        continue
-      if is_real_error(line):
-        send_error_once(chat_id, file_id, line)
-        continue
+
+      # التقاط طلب الإدخال ورسم اللوحة التفاعلية
       if looks_prompt(line):
         if send_prompt_once(chat_id, file_id, line):
           pending_inputs[chat_id] = file_id
@@ -672,7 +476,6 @@ def monitor_output(chat_id, file_id, process):
           safe_send(
               chat_id, prompt_msg, reply_markup=markup, parse_mode='HTML'
           )
-        continue
   except:
     pass
   finally:
@@ -688,6 +491,7 @@ def stop_one(chat_id, file_id, delete=False):
     return False
   info = active_processes[chat_id][file_id]
   proc = info.get('process')
+
   if proc and proc.poll() is None:
     try:
       proc.stdin.close()
@@ -696,16 +500,17 @@ def stop_one(chat_id, file_id, delete=False):
     try:
       proc.terminate()
       try:
-        proc.wait(timeout=5)
+        proc.wait(timeout=3)
       except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
     except:
       pass
+
   if pending_inputs.get(chat_id) == file_id:
     pending_inputs.pop(chat_id, None)
-  error_tracker.pop(file_id, None)
   prompt_tracker.pop(file_id, None)
+
   if delete and info.get('path') and os.path.exists(info['path']):
     try:
       os.remove(info['path'])
@@ -740,7 +545,7 @@ def scan_file(path, uid):
 
 
 # ============================================================
-# قائمة الملفات
+# عرض ملفاتي والقائمة
 # ============================================================
 def show_my_files(call, edit=False):
   chat_id = call.message.chat.id
@@ -751,6 +556,7 @@ def show_my_files(call, edit=False):
     else:
       safe_send(chat_id, txt)
     return
+
   files = active_processes[chat_id]
   running = sum(
       1 for f in files.values() if f.get('process') and f['process'].poll() is None
@@ -759,6 +565,7 @@ def show_my_files(call, edit=False):
       f'📂 <b>ملفاتك</b> ({len(files)})\n🟢 يعمل: {running} | 🔴 متوقف:'
       f' {len(files) - running}'
   )
+
   markup = types.InlineKeyboardMarkup(row_width=4)
   for fid, info in files.items():
     proc = info.get('process')
@@ -776,6 +583,7 @@ def show_my_files(call, edit=False):
       types.InlineKeyboardButton('🛑 إيقاف الكل', callback_data='stop_all'),
       types.InlineKeyboardButton('🔙 القائمة', callback_data='back_to_main'),
   )
+
   if edit:
     res = safe_edit(
         chat_id,
@@ -790,9 +598,6 @@ def show_my_files(call, edit=False):
     safe_send(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 
-# ============================================================
-# القائمة الرئيسية
-# ============================================================
 def show_main_menu(message):
   markup = types.InlineKeyboardMarkup(row_width=2)
   markup.add(
@@ -820,11 +625,13 @@ def show_main_menu(message):
   markup.add(
       types.InlineKeyboardButton('📞 التواصل مع الدعم', callback_data='support')
   )
+
   if is_admin(message.from_user.id):
     markup.add(
         types.InlineKeyboardButton('👥 المستخدمون', callback_data='users'),
         types.InlineKeyboardButton('⚡ حالة البوت', callback_data='bot_status'),
     )
+
   safe_send(
       message.chat.id,
       f'🐍 <b>Python Hosting</b>\n\nمرحباً،'
@@ -837,7 +644,7 @@ def show_main_menu(message):
 
 
 # ============================================================
-# Handlers
+# Handlers & Response
 # ============================================================
 @bot.message_handler(commands=['start'], chat_types=['private'])
 def cmd_start(message):
@@ -871,9 +678,6 @@ def cmd_start(message):
     safe_send(message.chat.id, '⏳ تم إرسال طلبك للأدمن.')
 
 
-# ============================================================
-# الاستجابة التفاعلية للإدخال (تم التعديل للتحقق المباشر)
-# ============================================================
 @bot.message_handler(
     func=lambda m: (
         m.chat.id in pending_inputs
@@ -884,40 +688,32 @@ def cmd_start(message):
 def handle_input(message):
   chat_id = message.chat.id
   file_id = pending_inputs.get(chat_id)
-  if not file_id:
-    return
 
   if (
-      chat_id not in active_processes
+      not file_id
+      or chat_id not in active_processes
       or file_id not in active_processes[chat_id]
   ):
     pending_inputs.pop(chat_id, None)
-    safe_send(chat_id, '❌ الملف غير موجود بالقائمة.')
     return
 
   proc = active_processes[chat_id][file_id].get('process')
 
-  # التحقق المرن لمعرفة سبب إغلاق العملية
-  if not proc or proc.poll() is not None:
-    pending_inputs.pop(chat_id, None)
-    safe_send(
-        chat_id,
-        '❌ <b>توقف الملف تلقائياً قبل استقبال المدخلات.</b>\nسيتم عرض'
-        ' الخطأ المسبب إن وجد أعلاه.',
-        parse_mode='HTML',
-    )
-    return
-
   user_input = (message.text or '').strip()
-  try:
-    proc.stdin.write((user_input + '\n').encode('utf-8'))
-    proc.stdin.flush()
 
-    bot.reply_to(message, 'تم إرسال الرد إلى الملف. ✅')
+  # تنظيف وإصلاح كتابة الرقم تلقائياً بإضافة (+) إذا نسيه المستخدم
+  if re.match(r'^\d{10,14}$', user_input) and not user_input.startswith('+'):
+    user_input = '+' + user_input
+
+  try:
+    if proc and proc.poll() is None:
+      proc.stdin.write((user_input + '\n').encode('utf-8'))
+      proc.stdin.flush()
+      bot.reply_to(message, 'تم إرسال الرد إلى الملف. ✅')
+
     pending_inputs.pop(chat_id, None)
-  except Exception as e:
+  except:
     pending_inputs.pop(chat_id, None)
-    safe_send(chat_id, f'❌ فشل الإرسال إلى الملف: {eh(str(e))}')
 
 
 @bot.message_handler(
@@ -963,27 +759,34 @@ def handle_doc(message):
   if not bot_running:
     safe_send(message.chat.id, '⏸️ البوت متوقف.')
     return
+
   if message.chat.id in waiting_library:
     waiting_library.discard(message.chat.id)
+
   try:
     chat_id = message.chat.id
     doc = message.document
     raw_name = doc.file_name or f'script_{uuid.uuid4().hex[:6]}.py'
     file_name = os.path.basename(raw_name)
+
     if not file_name.endswith('.py'):
       safe_send(chat_id, '❌ فقط ملفات .py')
       return
     if doc.file_size and doc.file_size > MAX_FILE_SIZE:
       safe_send(chat_id, f'⛔ الحجم > {MAX_FILE_SIZE // (1024*1024)}MB')
       return
+
     file_info = bot.get_file(doc.file_id)
     downloaded = bot.download_file(file_info.file_path)
     file_id = uuid.uuid4().hex[:8]
+
     user_dir = os.path.join(UPLOADED_FILES_DIR, str(uid))
     os.makedirs(user_dir, exist_ok=True)
     save_path = os.path.abspath(os.path.join(user_dir, f'{file_id}_{file_name}'))
+
     with open(save_path, 'wb') as f:
       f.write(downloaded)
+
     if protection_enabled:
       bad, reason = scan_file(save_path, uid)
       if bad:
@@ -993,8 +796,10 @@ def handle_doc(message):
           pass
         safe_send(chat_id, f'⛔ {eh(reason)}', parse_mode='HTML')
         return
+
     if chat_id not in active_processes:
       active_processes[chat_id] = {}
+
     active_processes[chat_id][file_id] = {
         'name': file_name,
         'path': save_path,
@@ -1015,7 +820,7 @@ def handle_doc(message):
 
 
 # ============================================================
-# أزرار الملفات
+# أزرار Callback
 # ============================================================
 @bot.callback_query_handler(func=lambda c: c.data.startswith('sf_'))
 def cb_stop(call):
@@ -1311,7 +1116,7 @@ def cmd_broadcast(message):
 
 
 # ============================================================
-# Cleanup
+# التنظيف والإغلاق
 # ============================================================
 def cleanup_all_processes():
   try:
@@ -1345,23 +1150,26 @@ except:
   pass
 
 # ============================================================
-# التشغيل
+# بدء التشغيل
 # ============================================================
 if __name__ == '__main__':
   print('=' * 55)
   print('🚀 Bot starting...')
   print('=' * 55)
   auto_install_packages()
+
   for _ in range(3):
     try:
       bot.remove_webhook()
       break
     except:
       time.sleep(1)
+
   try:
     bot.get_updates(offset=-1, timeout=1)
   except:
     pass
+
   ALLOWED_UPDATES = [
       'message',
       'edited_message',
@@ -1376,6 +1184,7 @@ if __name__ == '__main__':
       'chat_member',
       'chat_join_request',
   ]
+
   while True:
     try:
       bot.infinity_polling(
