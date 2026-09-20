@@ -35,7 +35,7 @@ for name in [
 # ============================================================
 # الإعدادات الرئيسية
 # ============================================================
-BOT_TOKEN = '8877293036:AAGg_82F0bT1Bhov42sk9qDcRMsVNpfnErw'
+BOT_TOKEN = '8809964582:AAGRNVCAsoQLRa9HfBCdumxPr07HDqE78rc'
 ADMIN_ID = 1920665874
 YOUR_USERNAME = '@u_8_y'
 ADMIN_CHANNEL = '@FD_CQ'
