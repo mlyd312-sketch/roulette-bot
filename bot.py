@@ -10,7 +10,7 @@ except Exception:
 from pathlib import Path
 
 # ---------------- إعدادات ----------------
-BOT_TOKEN = "8809964582:AAGRNVCAsoQLRa9HfBCdumxPr07HDqE78rc"
+BOT_TOKEN = "8819348912:AAEuppR7MTSl9dfnMbt3sW_bqSuvwDsoVUs"
 ADMIN_ID = int(os.getenv("ADMIN_ID", "1920665874"))
 YOUR_USERNAME = os.getenv("YOUR_USERNAME", "@u_8_y")
 ADMIN_CHANNEL = os.getenv("ADMIN_CHANNEL", "@FD_CQ")
